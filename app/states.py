@@ -1,7 +1,28 @@
 from aiogram.fsm.state import State, StatesGroup
+
+
+# ================= CREATE BOT =================
 class CreateBot(StatesGroup):
-    bot_type=State(); token=State(); name=State(); tariff=State(); receipt=State()
+    bot_type = State()      # bot turini tanlash
+    token = State()         # token kiritish (create + update uchun ishlatiladi)
+    name = State()          # bot nomi
+    tariff = State()        # tarif tanlash
+    receipt = State()       # chek yuborish
+
+
+# ================= MOVIE BOT =================
 class MovieState(StatesGroup):
-    add_code=State(); add_content=State(); del_code=State(); channel=State(); broadcast=State(); sub_channel=State(); premium_code=State()
+    add_code = State()          # kino kodi yozish
+    add_content = State()       # kino content (forward/file)
+    del_code = State()          # kino o‘chirish
+    channel = State()           # kino kanal ulash
+    broadcast = State()         # reklama yuborish
+    sub_channel = State()       # majburiy obuna
+    premium_code = State()      # premium kino
+
+
+# ================= CLEANER =================
 class CleanerState(StatesGroup):
-    add_black=State(); add_white=State(); test=State()
+    add_black = State()     # blacklist qo‘shish
+    add_white = State()     # whitelist qo‘shish
+    test = State()          # test rejim
