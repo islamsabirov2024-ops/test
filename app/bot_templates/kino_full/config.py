@@ -19,11 +19,14 @@ def _get_bool(name: str, default: bool = False) -> bool:
     return raw in {"1", "true", "yes", "on"}
 
 
-BOT_TOKEN = _get_str("BOT_TOKEN")
-BOT_NAME = _get_str("BOT_NAME", "Kino Bot")
-BOT_USERNAME = _get_str("BOT_USERNAME")
+# MUHIM:
+# Glavni bot BOT_TOKEN bilan ishlaydi.
+# Kino child bot esa CHILD_BOT_TOKEN bilan ishlashi kerak.
+BOT_TOKEN = _get_str("CHILD_BOT_TOKEN") or _get_str("BOT_TOKEN")
+BOT_NAME = _get_str("CHILD_BOT_NAME", _get_str("BOT_NAME", "Kino Bot"))
+BOT_USERNAME = _get_str("CHILD_BOT_USERNAME", _get_str("BOT_USERNAME"))
 BOT_VERSION = _get_str("BOT_VERSION", "2.1.0")
-SUPER_ADMIN_ID = _get_int("SUPER_ADMIN_ID", 0)
+SUPER_ADMIN_ID = _get_int("CHILD_SUPER_ADMIN_ID", _get_int("SUPER_ADMIN_ID", 0))
 
 HOST = _get_str("HOST", "0.0.0.0")
 PORT = _get_int("PORT", 8080)
@@ -46,7 +49,10 @@ PGPASSWORD = _get_str("PGPASSWORD")
 PGDATABASE = _get_str("PGDATABASE")
 
 PAYMENT_CARD = _get_str("PAYMENT_CARD")
-PAYMENT_NOTE = _get_str("PAYMENT_NOTE", "To‘lovni qilib bo‘lgach, chekni rasm qilib yuboring.")
+PAYMENT_NOTE = _get_str(
+    "PAYMENT_NOTE",
+    "To‘lovni qilib bo‘lgach, chekni rasm qilib yuboring."
+)
 
 PREMIUM_ENABLED = _get_bool("PREMIUM_ENABLED", True)
 SUBSCRIPTION_REQUIRED = _get_bool("SUBSCRIPTION_REQUIRED", True)
@@ -71,4 +77,4 @@ def build_database_url() -> str:
 DB_DSN = build_database_url()
 
 if not BOT_TOKEN:
-    raise RuntimeError("❌ BOT_TOKEN kiritilmagan")
+    raise RuntimeError("❌ CHILD_BOT_TOKEN kiritilmagan")
