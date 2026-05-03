@@ -177,10 +177,11 @@ async def my_bots(m:Message):
         until=int(r['platform_until'] or 0) if 'platform_until' in r.keys() else 0
         left=max(0, until-int(time.time()))
         days=left//86400; hours=(left%86400)//3600; mins=(left%3600)//60
+        price_txt = (fmt_money(t['monthly_price']) + " so'm/oy") if t else "0 so'm"
         txt=(f"🤖 Bot: @{r['username']}\n\n"
              f"🔹 Tarif: {(t['name'] if t else 'Belgilanmagan')}\n"
              f"📊 Kunlik faollik: {limit_txt}\n"
-             f"💵 Narx: {(fmt_money(t['monthly_price']) + " so‘m/oy" if t else "0 so‘m")}\n"
+             f"💵 Narx: {price_txt}\n"
              f"⏳ Muddati: {days} kun {hours} soat {mins} daqiqa\n\n"
              f"📅 Tarifni uzaytirish yoki o‘zgartirish uchun quyidagi tugmalardan foydalaning.")
         await m.answer(txt, reply_markup=bot_manage_inline(r['id'], r['status']))
