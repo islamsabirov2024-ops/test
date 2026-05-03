@@ -1,0 +1,352 @@
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+
+def rkb(rows):
+    return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=x) for x in row] for row in rows], resize_keyboard=True)
+
+
+def nav_row():
+    return ['◀️ Orqaga', '🏠 Asosiy panel']
+
+
+def main_menu():
+    return rkb([
+        ['➕ Bot yaratish','🤖 Botlarim'],
+        ['🗣 Referal','📱 Shaxsiy kabinet'],
+        ['🚀 Saytga kirish','💳 Hisob to\'ldirish'],
+        ['📩 Murojaat','📚 Qo\'llanma'],
+    ])
+
+
+def bot_types_menu():
+    return rkb([
+        ['🎬 Kino Bot'],
+        ['🚀 Nakrutka Bot'],
+        ['💵 Pul Bot'],
+        ['📥 OpenBudget Bot'],
+        ['🛍 Mahsulot Bot'],
+        ['🔐 VipKanal Bot'],
+        ['🚀 Smm Bot [💎 PREMIUM]'],
+        ['🎥 ProKino Bot [💎 PREMIUM]'],
+        ['◀️ Orqaga'],
+    ])
+
+
+def create_kino_menu(price=0):
+    rows=[]
+    rows.append([f'✅ Bot yaratish — {price:,} so\'m'.replace(',', ' ')])
+    rows.append(['📋 Tariflar ro\'yxati'])
+    rows.append(['◀️ Orqaga'])
+    return rkb(rows)
+
+
+def super_menu():
+    return rkb([
+        ['📊 Umumiy statistika','📩 Xabar yuborish'],
+        ['🤖 Barcha botlar','💳 To\'lovlar'],
+        ['⚙️ Global sozlamalar','👥 Foydalanuvchilar'],
+        nav_row(),
+    ])
+
+
+def global_settings_menu():
+    return rkb([
+        ['📦 Platforma tariflari'],
+        ['💰 Eski yaratish narxi','🎁 Referal bonus summasi'],
+        ['📋 Hozirgi sozlamalar'],
+        nav_row(),
+    ])
+
+
+def topup_menu():
+    return rkb([
+        ['⚪ Payme (Avto)'],
+        ['🔵 Click (Avto)'],
+        ['💳 Karta (Avto)'],
+        ['💳 Humo'],
+        nav_row(),
+    ])
+
+
+def kino_user_menu(is_admin=False):
+    # User uchun sodda menyu: kino olish uchun tugma emas, kod yoziladi.
+    rows=[
+        ['💎 Premium olish','🆕 Yangi kinolar'],
+        ['🔥 TOP kinolar','❤️ Sevimlilar'],
+        ['🗣 Referal','🎬 Kino kodini yozing'],
+    ]
+    if is_admin: rows.append(['⚙️ Boshqaruv'])
+    return rkb(rows)
+
+
+def kino_admin_menu():
+    return rkb([
+        ['📊 Statistika','📩 Xabar yuborish'],
+        ['🎬 Kontent boshqaruvi','🔐 Kanallar'],
+        ['⚙️ Tizim sozlamalari','📥 So‘rovlar'],
+        ['👮 Admin log','👥 Foydalanuvchilar'],
+        nav_row(),
+    ])
+
+def content_menu():
+    return rkb([
+        ['📥 Kino yuklash'],
+        ['📝 Kino tahrirlash','🗑 Kino o‘chirish'],
+        ['📋 Kinolar ro‘yxati'],
+        ['🆕 Yangi kinolar','🔥 TOP kinolar'],
+        nav_row(),
+    ])
+
+def settings_menu():
+    return rkb([
+        ['📢 Reklama','👮 Adminlar'],
+        ['↗️ Ulashish','📝 Matnlar'],
+        ['💳 To‘lov tizimlari','⚙️ Premium'],
+        ['🎁 Referal sozlamalari','🛡 Anti-spam'],
+        ['🧹 Kesh tozalash'],
+        nav_row(),
+    ])
+
+def premium_admin_menu():
+    return rkb([
+        ['💡 Holat o‘zgartirish', '👥 Premium foydalanuvchilar ro‘yxati'],
+        ['📋 Premium tariflar', '➕ Tarif qo‘shish'],
+        ['✏️ Tarifni o‘zgartirish', '🗑 Tarifni o‘chirish'],
+        ['➕ Premium berish / Muddatni boshqarish', '➖ Premium olib tashlash'],
+        nav_row(),
+    ])
+
+def pay_menu():
+    return rkb([
+        ['🤖 Avtomat to‘lov ON/OFF','👨‍💼 Admin tasdiq ON/OFF'],
+        ['📋 To‘lov tizimlari ro‘yxati'],
+        ['💳 Karta raqamini sozlash'],
+        ['➕ To‘lov tizimi qo‘shish'],
+        ['🗑 To‘lov tizimini o‘chirish'],
+        nav_row(),
+    ])
+
+def ads_menu(start_on=False, movie_on=False):
+    return rkb([
+        [f"🚀 Start: {'✅ Yoniq' if start_on else '❌ O‘chiq'}", f"🎬 Kino: {'✅ Yoniq' if movie_on else '❌ O‘chiq'}"],
+        ['➕ Reklama qo‘shish'],
+        ['📋 Reklamalar ro‘yxati'],
+        nav_row(),
+    ])
+
+
+def ad_confirm_menu():
+    return rkb([
+        ['🎛 Tugma qo‘shish'],
+        ['✅ Saqlash'],
+        ['🗑 Bekor qilish'],
+        nav_row(),
+    ])
+
+def ad_buttons_edit_menu():
+    return rkb([
+        ['🗑 Tugmalarni o‘chirish'],
+        nav_row(),
+    ])
+
+def admins_menu():
+    return rkb([
+        ['➕ Admin qo‘shish','➖ Adminni o‘chirish'],
+        ['📋 Adminlar ro‘yxati'],
+        nav_row(),
+    ])
+
+def protect_menu():
+    return rkb([
+        ['👥 Oddiy (🔒 Ruxsat berish)'],
+        ['🌟 Premium (🔒 Ruxsat berish)'],
+        nav_row(),
+    ])
+
+def texts_menu():
+    return rkb([
+        ['👋 Start xabari'], ['📢 Kanallar chiqadigan matn'], ['➕ Obuna bo‘lish tugmasi'], ['✅ Tekshirish tugmasi'],
+        ['🎬 Kino caption matni'], ['↗️ Ulashish tugmasi'], ['🔒 Premium kino xabari'], ['💎 Premium tugmasi'],
+        ['❌ Noto‘g‘ri kod xabari'], ['🎬 Kino nomi matni'], ['◀️ Asosiy panel'],
+    ])
+
+def channels_menu():
+    return rkb([
+        ['➕ Kanal qo‘shish'],
+        ['📋 Ro‘yxatni ko‘rish'],
+        ['🗑 Kanalni o‘chirish'],
+        ['🔄 Fake verify ON/OFF','🔐 Obuna statistikasi'],
+        nav_row(),
+    ])
+
+def channel_type_menu():
+    return rkb([
+        ['📢 Ommaviy / Shaxsiy (Kanal · Guruh)'],
+        ['🔐 Shaxsiy / So‘rovli havola'],
+        ['🌐 Oddiy havola'],
+        nav_row(),
+    ])
+
+def yes_no_premium_menu():
+    return rkb([
+        ['✅ Ha — Premium'],
+        ['❌ Yo‘q — Oddiy'],
+        ['❌ Bekor qilish'],
+    ])
+
+
+
+def edit_movie_menu():
+    return rkb([
+        ['💎 Premium holatini o‘zgartirish'],
+        ['🎬 Kino nomini o‘zgartirish'],
+        ['🔑 Kino kodini o‘zgartirish'],
+        nav_row(),
+    ])
+
+def tariff_manage_menu():
+    return rkb([
+        ['➕ Tarif qo‘shish'],
+        ['✏️ Tarifni o‘zgartirish'],
+        ['🗑 Tarifni o‘chirish'],
+        nav_row(),
+    ])
+
+def referral_admin_menu():
+    return rkb([
+        ['🎁 Referal bonus summasi'],
+        ['📋 Referal sozlamalari'],
+        nav_row(),
+    ])
+
+def antispam_menu():
+    return rkb([
+        ['🛡 Anti-spam ON/OFF'],
+        ['⚡ Limit sozlash','⏱ Blok vaqtini sozlash'],
+        nav_row(),
+    ])
+
+def cache_menu():
+    return rkb([
+        ['🧹 Keshni tozalash'],
+        ['♻️ State/spam cache tozalash'],
+        nav_row(),
+    ])
+
+def broadcast_confirm_menu():
+    return rkb([
+        ['🔘 Tugma qo‘shish'],
+        ['✅ Boshlash'],
+        ['❌ Bekor qilish'],
+    ])
+
+def bot_actions(bot_id:int, status='active'):
+    b=InlineKeyboardBuilder(); b.button(text='🟢 Yoqish' if status!='active' else '🔴 To‘xtatish', callback_data=f'bot_toggle:{bot_id}'); b.button(text='🔑 Token almashtirish', callback_data=f'bot_token:{bot_id}'); b.button(text='🗑 O‘chirish', callback_data=f'bot_delete:{bot_id}'); b.adjust(1); return b.as_markup()
+
+def sub_check():
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='✅ Tekshirish', callback_data='check_sub')]])
+
+def tariff_inline(rows):
+    b=InlineKeyboardBuilder()
+    for r in rows:
+        label=f"💎 {r['name']} — {r['days']} kun — {r['price']:,} so‘m".replace(',', ' ')
+        b.button(text=label, callback_data=f'buy_tariff:{r["id"]}')
+        b.button(text=f"💼 Referal balans bilan olish", callback_data=f'buy_ref:{r["id"]}')
+    b.adjust(1)
+    return b.as_markup()
+
+def pay_methods_inline(rows, tariff_id):
+    b=InlineKeyboardBuilder()
+    for r in rows:
+        b.button(text=f"💳 {r['name']}", callback_data=f'pay_method:{tariff_id}:{r["id"]}')
+    b.adjust(1)
+    return b.as_markup()
+
+def payment_options_inline(rows, tariff_id, auto_enabled=True, manual_enabled=True):
+    b=InlineKeyboardBuilder()
+    if auto_enabled:
+        b.button(text='🤖 Payme (Avtomat)', callback_data=f'auto_pay:{tariff_id}:payme')
+        b.button(text='🤖 Click (Avtomat)', callback_data=f'auto_pay:{tariff_id}:click')
+    if manual_enabled:
+        for r in rows:
+            b.button(text=f"👨‍💼 {r['name']} (Admin tasdiq)", callback_data=f'pay_method:{tariff_id}:{r["id"]}')
+    b.button(text='⬅️ Orqaga', callback_data='show_tariffs')
+    b.adjust(1)
+    return b.as_markup()
+
+def auto_payment_link_inline(url: str):
+    if url:
+        return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='💳 To‘lov qilish', url=url)]])
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='⬅️ Tariflarga qaytish', callback_data='show_tariffs')]])
+
+def premium_locked_inline():
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='💎 Premium olish', callback_data='show_tariffs')]])
+
+
+def payment_admin_inline(payment_id:int):
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='✅ Tasdiqlash', callback_data=f'pay_ok:{payment_id}'), InlineKeyboardButton(text='❌ Rad etish', callback_data=f'pay_no:{payment_id}')]])
+
+def movie_inline(movie_id:int):
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='❤️ Sevimlilarga qo‘shish/olish', callback_data=f'fav:{movie_id}')]])
+
+def request_admin_inline(req_id:int):
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='✅ Bajarildi', callback_data=f'req_done:{req_id}'), InlineKeyboardButton(text='❌ Rad', callback_data=f'req_no:{req_id}')]])
+
+
+def movie_existing_menu():
+    return rkb([
+        ['➕ Qism qo‘shish'],
+        ['✏️ Almashtirish'],
+        ['❌ Bekor qilish'],
+    ])
+
+def movie_parts_inline(parts, premium=False):
+    b=InlineKeyboardBuilder()
+    for p in parts:
+        b.button(text=str(p['part_no']), callback_data=f'movie_part:{p["id"]}')
+    b.adjust(3)
+    if premium:
+        b.button(text='💎 Premium olish', callback_data='show_tariffs')
+        b.adjust(3, 1)
+    return b.as_markup()
+
+
+def platform_tariffs_inline(rows, current_id=0, prefix='platform_select'):
+    b=InlineKeyboardBuilder()
+    for r in rows:
+        mark='✅ ' if int(r['id'])==int(current_id or 0) else ''
+        limit='Cheksiz' if int(r['daily_limit'] or 0)==0 else f"{int(r['daily_limit']):,} odam/kun".replace(',', ' ')
+        b.button(text=f"{mark}{r['name']} — {int(r['monthly_price']):,} so‘m".replace(',', ' '), callback_data=f"{prefix}:{r['id']}")
+    b.adjust(1)
+    return b.as_markup()
+
+def bot_manage_inline(bot_id:int, status='active'):
+    b=InlineKeyboardBuilder()
+    b.button(text='⚙️ Botni sozlash', callback_data=f'bot_settings:{bot_id}')
+    b.button(text='📊 Tarifni o‘zgartirish', callback_data=f'bot_upgrade:{bot_id}')
+    b.button(text='💵 To‘lov muddati', callback_data=f'bot_paydays:{bot_id}')
+    b.button(text='📈 Dashboard (Web)', callback_data=f'bot_dashboard:{bot_id}')
+    b.button(text='◀️ Orqaga', callback_data='bot_back')
+    b.button(text='🗑 O‘chirish', callback_data=f'bot_delete:{bot_id}')
+    b.adjust(1,1,1,1,2)
+    return b.as_markup()
+
+def bot_settings_inline(bot_id:int):
+    b=InlineKeyboardBuilder()
+    b.button(text='🔑 Tokenni Yangilash', callback_data=f'bot_token:{bot_id}')
+    b.button(text='🔄 Botni Yangilash', callback_data=f'bot_restart:{bot_id}')
+    b.button(text='🔀 Botni O‘tkazish', callback_data=f'bot_transfer:{bot_id}')
+    b.button(text='🆔 Admin ID', callback_data=f'bot_adminid:{bot_id}')
+    b.button(text='🧹 Keshni Tozalash', callback_data=f'bot_clearcache:{bot_id}')
+    b.button(text='◀️ Orqaga', callback_data=f'bot_manage:{bot_id}')
+    b.adjust(2,2,1,1)
+    return b.as_markup()
+
+def platform_admin_menu():
+    return rkb([
+        ['📦 Platforma tariflari'],
+        ['➕ Platforma tarif qo‘shish','✏️ Platforma tarif o‘zgartirish'],
+        ['🗑 Platforma tarif o‘chirish'],
+        nav_row(),
+    ])
