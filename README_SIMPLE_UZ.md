@@ -41,3 +41,15 @@ python -m app.main
 7. User Bot yaratish bosadi, tarif tanlaydi, token yuboradi.
 8. Kino bot avtomatik yaratiladi.
 9. Kino botga kirib /panel bosadi va sozlaydi.
+
+
+## MUHIM
+Railway’da PostgreSQL ishlating. DB_PATH ni o‘chiring. DATABASE_URL to‘liq postgresql://... bo‘lsin.
+Chek tasdiqlansa admin xabari TASDIQLANDI bo‘lib o‘zgaradi.
+
+
+## FULL PRO qo‘shimchalar
+- Smart Limit: limit oshsa bot darrov o‘chmaydi, 24 soat sekin rejimda ishlaydi.
+- DB tozalash: eski chek/reklama/runtime yozuvlarini tozalaydi, balans va kinolarni o‘chirmaydi.
+- Premium to‘lov: faqat avtomat emas, admin tasdiq va avtomat ikkalasi ham alohida ON/OFF.
+- Reklama queue: xabarlar navbat bilan yuboriladi.

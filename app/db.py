@@ -77,6 +77,20 @@ async def init_db():
         for q in INDEXES:
             try: await db.execute(q)
             except Exception: pass
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS main_topups(
+            id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            amount INTEGER NOT NULL,
+            method TEXT DEFAULT '',
+            file_id TEXT DEFAULT '',
+            file_type TEXT DEFAULT '',
+            status TEXT DEFAULT 'pending',
+            created_at INTEGER DEFAULT 0,
+            decided_at INTEGER DEFAULT 0
+        )
+        """)
+
         await db.commit()
 
 async def add_user(user_id:int, ref_by=None):
@@ -582,3 +596,122 @@ async def record_ad_delivery(bot_id:int,user_id:int,ad_id:int):
     async with conn() as db:
         await db.execute('INSERT INTO ad_deliveries(bot_id,user_id,ad_id,delivered_at) VALUES(?,?,?,?)',(bot_id,user_id,ad_id,int(time.time())))
         await db.commit()
+
+# ===== MAIN BOT PAYMENT PERSISTENCE =====
+async def add_main_topup(req_id: str, user_id: int, amount: int, method: str, file_id: str, file_type: str):
+    async with conn() as db:
+        await db.execute(
+            """INSERT OR REPLACE INTO main_topups(id,user_id,amount,method,file_id,file_type,status,created_at)
+               VALUES(?,?,?,?,?,?,?,?)""",
+            (req_id, user_id, amount, method, file_id, file_type, "pending", int(time.time()))
+        )
+        await db.commit()
+
+async def get_main_topup(req_id: str):
+    async with conn() as db:
+        cur = await db.execute("SELECT * FROM main_topups WHERE id=?", (req_id,))
+        return await cur.fetchone()
+
+async def set_main_topup_status(req_id: str, status: str):
+    async with conn() as db:
+        await db.execute("UPDATE main_topups SET status=?, decided_at=? WHERE id=?", (status, int(time.time()), req_id))
+        await db.commit()
+
+async def pending_main_topups():
+    async with conn() as db:
+        cur = await db.execute("SELECT * FROM main_topups WHERE status='pending' ORDER BY created_at DESC")
+        return await cur.fetchall()
+
+async def add_balance(user_id: int, amount: int):
+    async with conn() as db:
+        await db.execute("INSERT OR IGNORE INTO users(user_id,balance,created_at) VALUES(?,?,?)", (user_id, 0, int(time.time())))
+        await db.execute("UPDATE users SET balance=COALESCE(balance,0)+? WHERE user_id=?", (amount, user_id))
+        await db.commit()
+
+async def clean_expired_premium(bot_id: int):
+    async with conn() as db:
+        cur = await db.execute("DELETE FROM premium WHERE bot_id=? AND until_ts<?", (bot_id, int(time.time())))
+        await db.commit()
+        return getattr(cur, "rowcount", 0) or 0
+
+
+# ===== FULL PRO: SMART LIMIT + DB CLEAN =====
+async def smart_limit_check(bot_id:int):
+    """
+    Limit oshsa bot darrov to‘xtamaydi:
+    1) 24 soat grace beradi
+    2) sekin rejimga o‘tadi
+    3) grace tugasa pause qiladi
+    """
+    r = await bot_by_id(bot_id)
+    if not r:
+        return False, 0, 0, "not_found", 0
+
+    now = int(time.time())
+    limit = int(r['daily_limit'] or 0) if 'daily_limit' in r.keys() else 0
+    used = await platform_daily_active(bot_id)
+    until = int(r['platform_until'] or 0) if 'platform_until' in r.keys() else 0
+
+    if r['status'] != 'active':
+        return False, used, limit, "paused", 0
+
+    if until and now > until:
+        async with conn() as db:
+            await db.execute("UPDATE bots SET status=?, auto_paused=1 WHERE id=?", ("paused", int(bot_id)))
+            await db.commit()
+        return False, used, limit, "expired", 0
+
+    if limit <= 0 or used < limit:
+        async with conn() as db:
+            try:
+                await db.execute("UPDATE bots SET slow_mode=0, grace_until=0 WHERE id=?", (int(bot_id),))
+                await db.commit()
+            except Exception:
+                pass
+        return True, used, limit, "ok", 0
+
+    grace_until = int(r['grace_until'] or 0) if 'grace_until' in r.keys() else 0
+    if not grace_until:
+        grace_until = now + 86400
+        async with conn() as db:
+            await db.execute("UPDATE bots SET slow_mode=1, grace_until=? WHERE id=?", (grace_until, int(bot_id)))
+            await db.commit()
+        return True, used, limit, "slow_grace_started", grace_until
+
+    if now <= grace_until:
+        async with conn() as db:
+            await db.execute("UPDATE bots SET slow_mode=1 WHERE id=?", (int(bot_id),))
+            await db.commit()
+        return True, used, limit, "slow", grace_until
+
+    async with conn() as db:
+        await db.execute("UPDATE bots SET status=?, auto_paused=1, slow_mode=0 WHERE id=?", ("paused", int(bot_id)))
+        await db.commit()
+    return False, used, limit, "grace_expired", grace_until
+
+
+async def db_cleanup(bot_id:int=0, days:int=30):
+    """Eski vaqtinchalik DB yozuvlarini tozalaydi. Muhim balans/bot/kino o‘chmaydi."""
+    cutoff = int(time.time()) - int(days) * 86400
+    deleted = {}
+    async with conn() as db:
+        for table, col in [
+            ("main_topups", "created_at"),
+            ("ad_deliveries", "delivered_at"),
+            ("runtime_events", "created_at"),
+        ]:
+            try:
+                if bot_id and table != "main_topups":
+                    cur = await db.execute(f"DELETE FROM {table} WHERE bot_id=? AND {col}<?", (int(bot_id), cutoff))
+                else:
+                    cur = await db.execute(f"DELETE FROM {table} WHERE {col}<?", (cutoff,))
+                deleted[table] = getattr(cur, "rowcount", 0) or 0
+            except Exception:
+                deleted[table] = 0
+        try:
+            cur = await db.execute("DELETE FROM premium WHERE until_ts<?", (int(time.time()),))
+            deleted["expired_premium"] = getattr(cur, "rowcount", 0) or 0
+        except Exception:
+            deleted["expired_premium"] = 0
+        await db.commit()
+    return deleted

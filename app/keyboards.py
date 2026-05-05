@@ -104,7 +104,7 @@ def settings_menu():
         ['↗️ Ulashish','📝 Matnlar'],
         ['💳 To‘lov tizimlari','⚙️ Premium'],
         ['🎁 Referal sozlamalari','🛡 Anti-spam'],
-        ['🧹 Kesh tozalash'],
+        ['🧹 Kesh tozalash','🗑 DB tozalash'],
         nav_row(),
     ])
 
