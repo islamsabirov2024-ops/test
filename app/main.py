@@ -64,6 +64,53 @@ def parse_schedule(text):
     return 0
 
 
+
+def normalize_channel_input(raw: str):
+    raw=(raw or '').strip()
+    if not raw:
+        return '', ''
+    if raw.startswith('-100') or raw.lstrip('-').isdigit():
+        return raw, ''
+    if raw.startswith('@'):
+        return raw, 'https://t.me/' + raw.lstrip('@')
+    if raw.startswith('https://t.me/'):
+        tail=raw.replace('https://t.me/','').strip('/')
+        if tail.startswith('+') or tail.startswith('joinchat/'):
+            return raw, raw
+        return '@' + tail.split('/')[0], raw
+    if raw.startswith('t.me/'):
+        tail=raw.replace('t.me/','').strip('/')
+        if tail.startswith('+') or tail.startswith('joinchat/'):
+            return 'https://' + raw, 'https://' + raw
+        return '@' + tail.split('/')[0], 'https://' + raw
+    return raw, raw if raw.startswith(('http://','https://')) else ''
+
+async def check_force_sub(bot: Bot, bot_id: int, user_id: int):
+    """Return (ok, missing_channels). Only Telegram channels/groups are validated."""
+    chans = await db.channels(bot_id)
+    fake = await db.get_setting(bot_id,'sub_fake_verify','0')
+    if SUBSCRIPTION_FAKE_VERIFY or fake == '1':
+        return True, []
+    missing = []
+    for ch in chans:
+        if not ch['checkable']:
+            continue
+        chat = str(ch['chat_id'] or '').strip()
+        if chat.startswith('http'):
+            # Invite links cannot be validated directly. Use forwarded post or -100 id for real validation.
+            missing.append(ch)
+            continue
+        try:
+            member = await bot.get_chat_member(chat, user_id)
+            if member.status in {'left','kicked'}:
+                missing.append(ch)
+            else:
+                await db.channel_pass(ch['id'])
+        except Exception:
+            missing.append(ch)
+    return len(missing) == 0, missing
+
+
 def _pay_setting_text(auto_enabled: str, manual_enabled: str) -> str:
     return (
         f"🤖 Avtomat to‘lov: {'✅ Yoniq' if auto_enabled == '1' else '❌ O‘chiq'}\n"
@@ -948,74 +995,170 @@ async def add_ch0(m:Message,state:FSMContext):
         '⚙️ Majburiy obuna turini tanlang:\n\n'
         'Quyida majburiy obunani qo‘shishning 3 ta turi mavjud:\n\n'
         '🔹 Ommaviy / Shaxsiy (Kanal · Guruh)\nHar qanday kanal yoki guruhni majburiy obunaga ulash.\n\n'
-        '🔹 Shaxsiy / So‘rovli havola\nShaxsiy yoki so‘rovli havola orqali o‘tganlarni kuzatish.\n\n'
+        '🔹 Shaxsiy / So‘rovli havola\nShaxsiy yoki so‘rovli kanal/guruhni post orqali ulash.\n\n'
         '🔹 Oddiy havola\nTelegramdan tashqari linklar: Instagram, sayt va boshqalar.',
-        reply_markup=channel_type_menu()
+        reply_markup=channel_type_menu(),
+        link_preview_options=NO_PREVIEW
     )
 
 @child_router.message(AddChannel.kind)
 async def add_ch1(m:Message,state:FSMContext):
-    txt=m.text.strip()
+    txt=(m.text or '').strip()
     if txt=='◀️ Orqaga':
-        await state.clear(); return await ch_menu(m)
+        await state.clear()
+        return await ch_menu(m)
+
     checkable=0 if 'Oddiy' in txt else 1
     await state.update_data(kind=txt, checkable=checkable)
+
     if checkable:
         await state.set_state(AddChannel.title)
         return await m.answer(
             f'{txt} - ulash\n\n'
-            'Quyida kanal/guruhni ulashning 3 ta oddiy usuli mavjud:\n\n'
-            '🔹 1. ID orqali ulash\nKanal yoki guruh ID raqamini kiriting. ID odatda -100... shaklida bo‘ladi.\n\n'
-            '🔹 2. Havola orqali ulash\nKanal/guruh havolasini yuboring. Masalan: @kanal_nomi yoki t.me/kanal\n\n'
-            '🔹 3. Postni ulash orqali\nKanal yoki guruhdan bitta postni ushbu botga yuboring.',
-            reply_markup=rkb([['◀️ Orqaga']])
+            'Kanal/guruhni ulash uchun quyidagilardan birini yuboring:\n\n'
+            '1. Public kanal username: @kanal_nomi\n'
+            '2. Kanal ID: -100xxxxxxxxxx\n'
+            '3. Kanaldan bitta postni forward qiling\n\n'
+            'Muhim: bot o‘sha kanal/guruhda admin bo‘lishi kerak.',
+            reply_markup=rkb([['◀️ Orqaga']]),
+            link_preview_options=NO_PREVIEW
         )
+
     await state.set_state(AddChannel.url)
-    await state.update_data(title='Oddiy havola', chat='')
-    return await m.answer('🔗 Havola kiriting:\n\nMasalan: site.com yoki t.me/kanal', reply_markup=rkb([['◀️ Orqaga']]))
+    await state.update_data(title='Oddiy havola', chat='', checkable=0)
+    return await m.answer(
+        '🔗 Oddiy havola kiriting:\n\n'
+        'Masalan: https://instagram.com/... yoki https://site.com\n\n'
+        'Bu havola faqat ko‘rsatiladi, obuna tekshirilmaydi.',
+        reply_markup=rkb([['◀️ Orqaga']]),
+        link_preview_options=NO_PREVIEW
+    )
 
 @child_router.message(AddChannel.title)
 async def add_ch2(m:Message,state:FSMContext):
-    if m.text=='◀️ Orqaga': await state.clear(); return await ch_menu(m)
-    if not m.text:
-        sender = getattr(m, 'sender_chat', None)
-        origin = getattr(m, 'forward_origin', None)
-        origin_chat = getattr(origin, 'chat', None) if origin else None
-        ch = sender or origin_chat
-        if ch:
-            title = ch.title or str(ch.id)
-            chat = str(ch.id)
-            url = ('https://t.me/' + ch.username) if getattr(ch, 'username', None) else ''
-            await state.update_data(title=title, chat=chat, url=url)
-            await state.set_state(AddChannel.url)
-            return await m.answer('✅ Kanal post orqali aniqlandi. Havolasini yuboring yoki “skip” yozing:', link_preview_options=NO_PREVIEW)
-        return await m.answer('❌ Kanal ID, @username, havola yoki kanal postini yuboring.')
-    raw=m.text.strip()
-    title=raw; chat=raw; url=raw if raw.startswith('http') else ('https://t.me/'+raw.lstrip('@') if raw.startswith('@') else '')
-    await state.update_data(title=title, chat=chat, url=url)
+    if m.text=='◀️ Orqaga':
+        await state.clear()
+        return await ch_menu(m)
+
+    sender = getattr(m, 'sender_chat', None)
+    origin = getattr(m, 'forward_origin', None)
+    origin_chat = getattr(origin, 'chat', None) if origin else None
+    ch = sender or origin_chat
+
+    if ch:
+        title = ch.title or str(ch.id)
+        chat = str(ch.id)
+        url = ('https://t.me/' + ch.username) if getattr(ch, 'username', None) else ''
+        await state.update_data(title=title, chat=chat, url=url, checkable=1)
+        await state.set_state(AddChannel.url)
+        return await m.answer(
+            '✅ Kanal post orqali aniqlandi.\n\n'
+            f'Kanal: {title}\n'
+            f'ID: {chat}\n\n'
+            'Endi kanal havolasini yuboring yoki skip yozing.',
+            reply_markup=rkb([['skip'], ['◀️ Orqaga']]),
+            link_preview_options=NO_PREVIEW
+        )
+
+    raw=(m.text or '').strip()
+    chat, url = normalize_channel_input(raw)
+    if not chat:
+        return await m.answer('❌ @username, -100 ID yoki kanal postini yuboring.', link_preview_options=NO_PREVIEW)
+
+    # Validate real Telegram subscription channel before saving.
+    if not chat.startswith('http'):
+        try:
+            await m.bot.get_chat(chat)
+        except Exception:
+            return await m.answer(
+                '❌ Kanal topilmadi yoki bot kanalga qo‘shilmagan.\n\n'
+                'Tekshiring:\n'
+                '1. Botni kanalga admin qiling\n'
+                '2. Public kanal bo‘lsa @username yuboring\n'
+                '3. Private kanal bo‘lsa kanaldan bitta postni forward qiling',
+                link_preview_options=NO_PREVIEW
+            )
+
+    await state.update_data(title=raw, chat=chat, url=url, checkable=1)
     await state.set_state(AddChannel.url)
-    await m.answer('🔗 Kanal havolasini kiriting yoki shu havolani tasdiqlash uchun qayta yuboring:')
+    if url:
+        return await m.answer(
+            f'✅ Kanal aniqlandi: {chat}\n\n'
+            'Havola ham tayyor. Saqlash uchun shu havolani qayta yuboring yoki skip yozing.',
+            reply_markup=rkb([['skip'], ['◀️ Orqaga']]),
+            link_preview_options=NO_PREVIEW
+        )
+    await m.answer('🔗 Kanal havolasini kiriting yoki skip yozing:', reply_markup=rkb([['skip'], ['◀️ Orqaga']]), link_preview_options=NO_PREVIEW)
 
 @child_router.message(AddChannel.url)
 async def add_ch4(m:Message,state:FSMContext):
-    if m.text=='◀️ Orqaga': await state.clear(); return await ch_menu(m)
-    d=await state.get_data(); bid=await runtime_db_id(m.bot.id)
-    url=m.text.strip()
-    if url.lower()=='skip':
-        url=d.get('url','')
-    title=d.get('title') or url
-    chat=d.get('chat') or url
+    if m.text=='◀️ Orqaga':
+        await state.clear()
+        return await ch_menu(m)
+
+    d=await state.get_data()
+    bid=await runtime_db_id(m.bot.id)
     checkable=int(d.get('checkable',1))
-    if checkable and url.startswith('@'):
+
+    url=(m.text or '').strip()
+    if url.lower()=='skip':
+        url=d.get('url','') or ''
+
+    title=d.get('title') or url or 'Kanal'
+    chat=d.get('chat') or url
+
+    if not checkable:
+        if not url.startswith(('http://','https://')):
+            return await m.answer('❌ Oddiy havola http:// yoki https:// bilan boshlanishi kerak.', link_preview_options=NO_PREVIEW)
         chat=url
-        url='https://t.me/'+url.lstrip('@')
+
+    if checkable:
+        chat, auto_url = normalize_channel_input(chat)
+        if not url:
+            url = auto_url
+        if chat.startswith('http'):
+            await state.clear()
+            return await m.answer(
+                '❌ Bu havola orqali obunani tekshirib bo‘lmaydi.\n\n'
+                'Private kanal bo‘lsa kanaldan bitta postni forward qiling yoki -100 ID yuboring.',
+                reply_markup=channels_menu(),
+                link_preview_options=NO_PREVIEW
+            )
+        try:
+            me=await m.bot.get_me()
+            member=await m.bot.get_chat_member(chat, me.id)
+            if member.status not in {'administrator','creator'}:
+                await state.clear()
+                return await m.answer(
+                    '❌ Bot bu kanalda admin emas.\n\n'
+                    'Botni kanal/guruhga admin qiling, keyin qayta qo‘shing.',
+                    reply_markup=channels_menu(),
+                    link_preview_options=NO_PREVIEW
+                )
+        except Exception:
+            await state.clear()
+            return await m.answer(
+                '❌ Kanalni tekshirib bo‘lmadi.\n\n'
+                'Botni kanalga admin qiling yoki to‘g‘ri @username / -100 ID yuboring.',
+                reply_markup=channels_menu(),
+                link_preview_options=NO_PREVIEW
+            )
+
     await db.add_channel(bid,title,chat,url,checkable)
-    await state.clear(); await m.answer('✅ Kanal qo‘shildi', reply_markup=channels_menu())
+    await state.clear()
+    await m.answer(
+        '✅ Kanal qo‘shildi va tekshiruvga tayyor!\n\n'
+        f'📌 Nomi: {title}\n'
+        f'🆔 Tekshiruv ID: {chat}\n'
+        f'🔗 Havola: {url or "kiritilmagan"}',
+        reply_markup=channels_menu(),
+        link_preview_options=NO_PREVIEW
+    )
 
 @child_router.message(F.text=='📋 Ro‘yxatni ko‘rish')
 async def ch_list(m:Message):
     rows=await db.channels(await runtime_db_id(m.bot.id))
-    await m.answer('📋 Majburiy obuna kanallari ro‘yxati:\n\n'+'\n'.join([f"{r['id']}. {r['title']} | {'✅ tekshiradi' if r['checkable'] else '🌐 oddiy link'} | {r['url']}" for r in rows]) if rows else 'Kanal yo‘q')
+    await m.answer('📋 Majburiy obuna kanallari ro‘yxati:\n\n'+'\n'.join([f"{r['id']}. {r['title']} | {'✅ tekshiradi' if r['checkable'] else '🌐 oddiy link'} | {r['url']}" for r in rows]) if rows else 'Kanal yo‘q', link_preview_options=NO_PREVIEW)
 @child_router.message(F.text=='🗑 Kanalni o‘chirish')
 async def del_ch1(m:Message,state:FSMContext): await state.set_state(DelChannel.id); await m.answer('🗑 Kanal ID raqamini yuboring:')
 @child_router.message(DelChannel.id)
@@ -1039,16 +1182,21 @@ async def sub_fake_toggle(m:Message):
 
 @child_router.callback_query(F.data=='check_sub')
 async def check_sub(c:CallbackQuery):
-    bid=await runtime_db_id(c.bot.id); ok=True; chans=await db.channels(bid)
-    for ch in chans:
-        if not ch['checkable']: continue
+    bid=await runtime_db_id(c.bot.id)
+    ok, missing = await check_force_sub(c.bot, bid, c.from_user.id)
+    if ok:
+        await c.answer('✅ Obuna tasdiqlandi', show_alert=True)
         try:
-            member=await c.bot.get_chat_member(ch['chat_id'], c.from_user.id)
-            if member.status in {'left','kicked'}: ok=False
-            else: await db.channel_pass(ch['id'])
-        except Exception: ok=False
-    fake=await db.get_setting(bid,'sub_fake_verify','0')
-    await c.answer('✅ Obuna tasdiqlandi' if ok or SUBSCRIPTION_FAKE_VERIFY or fake=='1' else '❌ Hali obuna bo‘lmadingiz', show_alert=True)
+            await c.message.edit_text('✅ Obuna tasdiqlandi!\n\nEndi kino kodini qayta yuboring.', reply_markup=None)
+        except Exception:
+            pass
+        return
+
+    await c.answer('❌ Hali barcha kanallarga obuna bo‘lmadingiz', show_alert=True)
+    try:
+        await c.message.edit_reply_markup(reply_markup=force_sub_inline(missing))
+    except Exception:
+        pass
 
 # SETTINGS: ads admins texts pay premium antispam
 @child_router.message(F.text=='📢 Reklama')
@@ -1688,18 +1836,14 @@ async def movie_code(m:Message):
         return await m.answer('⛔ Bot hozir cheklangan. Bot egasi tarifni oshirgandan keyin avtomatik ishlaydi.')
     ok,wait=await spam_allowed(bid,m.from_user.id)
     if not ok: return await m.answer(f'⛔ Juda tez-tez yuboryapsiz! Iltimos {wait} soniya kuting...')
-    channels=await db.channels(bid)
-    fake=await db.get_setting(bid,'sub_fake_verify','0')
-    if channels and not SUBSCRIPTION_FAKE_VERIFY and fake!='1':
-        not_join=[]
-        for ch in channels:
-            if not ch['checkable']: continue
-            try:
-                member=await m.bot.get_chat_member(ch['chat_id'], m.from_user.id)
-                if member.status in {'left','kicked'}: not_join.append(ch)
-            except Exception: not_join.append(ch)
-        if not_join:
-            return await m.answer('🔐 Kino olish uchun quyidagi kanallarga obuna bo‘ling:\n'+'\n'.join([f"• {x['url']}" for x in not_join]), reply_markup=sub_check())
+    ok_sub, not_join = await check_force_sub(m.bot, bid, m.from_user.id)
+    if not ok_sub:
+        return await m.answer(
+            '🔐 Kino olish uchun quyidagi kanallarga obuna bo‘ling.\n\n'
+            'Obuna bo‘lgach ✅ Tekshirish tugmasini bosing.',
+            reply_markup=force_sub_inline(not_join),
+            link_preview_options=NO_PREVIEW
+        )
     mv=await db.get_movie(bid, m.text.strip())
     if not mv: return await m.answer(await db.get_setting(bid,'text_Noto‘g‘ri_kod_xabari','❌ Bunday kod topilmadi.'))
     if mv['premium'] and not await db.has_premium(bid,m.from_user.id): return await m.answer(await db.get_setting(bid,'text_Premium_kino_xabari','🔒 Bu kino premium. Ko‘rish uchun 💎 Premium olish tugmasini bosing.'), reply_markup=premium_locked_inline())

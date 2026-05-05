@@ -176,7 +176,7 @@ def channels_menu():
         ['➕ Kanal qo‘shish'],
         ['📋 Ro‘yxatni ko‘rish'],
         ['🗑 Kanalni o‘chirish'],
-        ['🔄 Fake verify ON/OFF','🔐 Obuna statistikasi'],
+        ['🔄 Fake verify ON/OFF'],
         nav_row(),
     ])
 
@@ -350,3 +350,20 @@ def platform_admin_menu():
         ['🗑 Platforma tarif o‘chirish'],
         nav_row(),
     ])
+
+
+def force_sub_inline(channels):
+    b = InlineKeyboardBuilder()
+    for ch in channels:
+        title = ch['title'] or 'Kanal'
+        url = ch['url'] or ''
+        if url and not url.startswith(('http://', 'https://')):
+            if url.startswith('@'):
+                url = 'https://t.me/' + url.lstrip('@')
+            elif url.startswith('t.me/'):
+                url = 'https://' + url
+        if url:
+            b.button(text=f"➕ {title}", url=url)
+    b.button(text='✅ Tekshirish', callback_data='check_sub')
+    b.adjust(1)
+    return b.as_markup()
