@@ -85,6 +85,36 @@ def normalize_channel_input(raw: str):
         return '@' + tail.split('/')[0], 'https://' + raw
     return raw, raw if raw.startswith(('http://','https://')) else ''
 
+
+async def visible_force_channels(bot_id:int, only_missing=None):
+    rows = only_missing if only_missing is not None else await db.channels(bot_id)
+    result = []
+    seen = set()
+    for ch in rows:
+        title = ch['title'] or ''
+        url = ch['url'] or ''
+        chat = str(ch['chat_id'] or '')
+        if not url:
+            if chat.startswith('@'):
+                url = 'https://t.me/' + chat.lstrip('@')
+            elif chat.startswith('t.me/'):
+                url = 'https://' + chat
+            elif chat.startswith('https://t.me/'):
+                url = chat
+        if url and not url.startswith(('http://','https://')):
+            if url.startswith('@'):
+                url = 'https://t.me/' + url.lstrip('@')
+            elif url.startswith('t.me/'):
+                url = 'https://' + url
+        key = (chat, url)
+        if key in seen:
+            continue
+        seen.add(key)
+        if not url:
+            continue
+        result.append(ch)
+    return result
+
 async def check_force_sub(bot: Bot, bot_id: int, user_id: int):
     """Return (ok, missing_channels). Only Telegram channels/groups are validated."""
     chans = await db.channels(bot_id)
@@ -1079,7 +1109,7 @@ async def add_ch2(m:Message,state:FSMContext):
                 link_preview_options=NO_PREVIEW
             )
 
-    await state.update_data(title=raw, chat=chat, url=url, checkable=1)
+    await state.update_data(title=(raw if raw.startswith('@') else (chat if chat.startswith('@') else raw)), chat=chat, url=url, checkable=1)
     await state.set_state(AddChannel.url)
     if url:
         return await m.answer(
@@ -1194,7 +1224,8 @@ async def check_sub(c:CallbackQuery):
 
     await c.answer('❌ Hali barcha kanallarga obuna bo‘lmadingiz', show_alert=True)
     try:
-        await c.message.edit_reply_markup(reply_markup=force_sub_inline(missing))
+        visible = await visible_force_channels(bid, missing)
+        await c.message.edit_reply_markup(reply_markup=force_sub_inline(visible))
     except Exception:
         pass
 
@@ -1838,10 +1869,17 @@ async def movie_code(m:Message):
     if not ok: return await m.answer(f'⛔ Juda tez-tez yuboryapsiz! Iltimos {wait} soniya kuting...')
     ok_sub, not_join = await check_force_sub(m.bot, bid, m.from_user.id)
     if not ok_sub:
+        visible = await visible_force_channels(bid, not_join)
+        if not visible:
+            return await m.answer(
+                '🔐 Majburiy obuna sozlangan, lekin kanal havolasi topilmadi.\n\n'
+                'Admin kanal qo‘shganda @username yoki kanal havolasini kiritishi kerak.',
+                link_preview_options=NO_PREVIEW
+            )
         return await m.answer(
             '🔐 Kino olish uchun quyidagi kanallarga obuna bo‘ling.\n\n'
             'Obuna bo‘lgach ✅ Tekshirish tugmasini bosing.',
-            reply_markup=force_sub_inline(not_join),
+            reply_markup=force_sub_inline(visible),
             link_preview_options=NO_PREVIEW
         )
     mv=await db.get_movie(bid, m.text.strip())

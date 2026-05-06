@@ -249,6 +249,7 @@ async def favorites(bot_id:int,user_id:int):
 
 async def add_channel(bot_id:int,title,chat_id,url,checkable=1):
     async with conn() as db:
+        await db.execute('DELETE FROM channels WHERE bot_id=? AND chat_id=?', (bot_id, chat_id))
         await db.execute('INSERT INTO channels(bot_id,title,chat_id,url,checkable,created_at) VALUES(?,?,?,?,?,?)',(bot_id,title,chat_id,url,checkable,int(time.time()))); await db.commit()
 async def channels(bot_id:int):
     async with conn() as db:

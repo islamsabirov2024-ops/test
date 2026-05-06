@@ -244,8 +244,6 @@ def broadcast_confirm_menu():
 def bot_actions(bot_id:int, status='active'):
     b=InlineKeyboardBuilder(); b.button(text='🟢 Yoqish' if status!='active' else '🔴 To‘xtatish', callback_data=f'bot_toggle:{bot_id}'); b.button(text='🔑 Token almashtirish', callback_data=f'bot_token:{bot_id}'); b.button(text='🗑 O‘chirish', callback_data=f'bot_delete:{bot_id}'); b.adjust(1); return b.as_markup()
 
-def sub_check():
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='✅ Tekshirish', callback_data='check_sub')]])
 
 def tariff_inline(rows):
     b=InlineKeyboardBuilder()
@@ -354,16 +352,57 @@ def platform_admin_menu():
 
 def force_sub_inline(channels):
     b = InlineKeyboardBuilder()
-    for ch in channels:
-        title = ch['title'] or 'Kanal'
-        url = ch['url'] or ''
+    seen = set()
+    for idx, ch in enumerate(channels, 1):
+        title = ''
+        url = ''
+        chat = ''
+        try:
+            title = ch['title'] or ''
+            url = ch['url'] or ''
+            chat = str(ch['chat_id'] or '')
+        except Exception:
+            pass
+
+        if not title or title.lower() in {'kanal', 'oddiy havola', 'obuna bo‘lish'}:
+            if chat.startswith('@'):
+                title = chat
+            elif url:
+                title = url.replace('https://t.me/', '@').replace('http://', '').replace('https://', '').split('/')[0]
+            else:
+                title = f"Kanal {idx}"
+
+        if not url:
+            if chat.startswith('@'):
+                url = 'https://t.me/' + chat.lstrip('@')
+            elif chat.startswith('t.me/'):
+                url = 'https://' + chat
+            elif chat.startswith('https://t.me/'):
+                url = chat
+
         if url and not url.startswith(('http://', 'https://')):
             if url.startswith('@'):
                 url = 'https://t.me/' + url.lstrip('@')
             elif url.startswith('t.me/'):
                 url = 'https://' + url
-        if url:
-            b.button(text=f"➕ {title}", url=url)
+
+        if not url:
+            continue
+
+        key = (title, url)
+        if key in seen:
+            continue
+        seen.add(key)
+        b.button(text=f"➕ {title}", url=url)
+
+    b.button(text='✅ Tekshirish', callback_data='check_sub')
+    b.adjust(1)
+    return b.as_markup()
+
+def sub_check(channels=None):
+    if channels:
+        return force_sub_inline(channels)
+    b = InlineKeyboardBuilder()
     b.button(text='✅ Tekshirish', callback_data='check_sub')
     b.adjust(1)
     return b.as_markup()
