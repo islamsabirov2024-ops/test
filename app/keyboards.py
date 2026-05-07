@@ -53,9 +53,11 @@ def super_menu():
 def global_settings_menu():
     return rkb([
         ['📦 Platforma tariflari'],
-        ['💰 Bot yaratish narxi','🎁 Referal bonus summasi'],
+        ['💳 Karta qo‘shish', '🗑 Karta o‘chirish'],
+        ['⚪ Payme sozlash', '🔘 Payme ON/OFF'],
+        ['💰 Bot yaratish narxi', '🎁 Referal bonus summasi'],
         ['📋 Hozirgi sozlamalar'],
-        nav_row(),
+        ['◀️ Orqaga', '🏠 Asosiy panel'],
     ])
 
 
