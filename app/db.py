@@ -719,13 +719,29 @@ async def db_cleanup(bot_id:int=0, days:int=30):
 
 
 async def activate_platform_for_bot(bot_id:int, tariff_id:int, days:int=30):
-    tariff = await platform_tariff(tariff_id)
+    limit = 300
+
+    try:
+        tariff = None
+
+        if 'get_platform_tariff' in globals():
+            tariff = await get_platform_tariff(tariff_id)
+        elif 'platform_tariff' in globals():
+            tariff = await platform_tariff(tariff_id)
+
+        if tariff:
+            limit = int(tariff.get('daily_limit') or 300)
+
+    except Exception:
+        limit = 300
+
     until = int(time.time()) + int(days) * 86400
-    limit = int(tariff['daily_limit'] or 0) if tariff else 300
+
     async with conn() as db:
         await db.execute(
             "UPDATE bots SET platform_tariff_id=?, platform_until=?, daily_limit=?, status='active', auto_paused=0 WHERE id=?",
             (int(tariff_id), until, limit, int(bot_id))
         )
         await db.commit()
+
     return until
