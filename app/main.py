@@ -1237,8 +1237,10 @@ async def ad_add_media(m:Message,state:FSMContext):
         media_type='document'; file_id=m.document.file_id
     elif m.animation:
         media_type='animation'; file_id=m.animation.file_id
-    await state.update_data(media_type=media_type,file_id=file_id,text=text,title=(text[:30] if text else media_type))
-    await m.answer('👇 Reklama shunday ko‘rinadi.\n\nTugma qo‘shish yoki saqlashingiz mumkin.', reply_markup=ad_confirm_menu(), link_preview_options=NO_PREVIEW)
+    data={'media_type':media_type,'file_id':file_id,'text':text,'title':(text[:30] if text else media_type),'buttons':''}
+    await state.update_data(**data)
+    await state.set_state(AddAd.confirm)
+    await send_ad_preview(m, data, '👇 Reklama shunday ko‘rinadi.\n\nTugma qo‘shish yoki saqlashingiz mumkin.')
 
 @child_router.message(F.text=='🎛 Tugma qo‘shish')
 async def ad_button_prompt(m:Message,state:FSMContext):
@@ -1248,16 +1250,26 @@ async def ad_button_prompt(m:Message,state:FSMContext):
 @child_router.message(AddAd.buttons)
 async def ad_buttons_save(m:Message,state:FSMContext):
     if m.text=='🗑 Tugmalarni o‘chirish':
-        await state.update_data(buttons=''); await state.set_state(AddAd.confirm); return await m.answer('✅ Tugmalar o‘chirildi.', reply_markup=ad_confirm_menu())
+        await state.update_data(buttons='')
+        d=await state.get_data()
+        await state.set_state(AddAd.confirm)
+        await m.answer('✅ Tugmalar o‘chirildi.')
+        return await send_ad_preview(m, d, '👇 Reklama shunday ko‘rinadi.\n\nTugma qo‘shish yoki saqlashingiz mumkin.')
     if m.text in {'◀️ Orqaga','🏠 Asosiy panel'}:
-        await state.set_state(AddAd.confirm); return await m.answer('Reklama saqlash menyusi:', reply_markup=ad_confirm_menu())
+        d=await state.get_data()
+        await state.set_state(AddAd.confirm)
+        return await send_ad_preview(m, d, 'Reklama saqlash menyusi:')
     await state.update_data(buttons=m.text or '')
+    d=await state.get_data()
     await state.set_state(AddAd.confirm)
-    await m.answer('✅ Tugmalar saqlandi!\n\n'+(m.text or ''), reply_markup=ad_confirm_menu(), link_preview_options=NO_PREVIEW)
+    await m.answer('✅ Tugmalar saqlandi!\n\n'+(m.text or ''), link_preview_options=NO_PREVIEW)
+    await send_ad_preview(m, d, '👆 Reklama shunday ko‘rinadi.\n\n👁 Ko‘rishlar: 0 ta\n⚙️ Holat: ✅ Faol\n📅 Qo‘shilgan: hozir')
 
 @child_router.message(F.text=='✅ Saqlash')
 async def ad_save(m:Message,state:FSMContext):
     d=await state.get_data(); bid=await runtime_db_id(m.bot.id)
+    if not d.get('media_type') and not d.get('text'):
+        return await m.answer('❌ Avval reklama postini yuboring.', reply_markup=ads_menu())
     await db.add_ad(bid,d.get('title','Reklama'),d.get('text',''),0,d.get('media_type','text'),d.get('file_id',''),d.get('buttons',''))
     await state.clear(); s=await db.get_setting(bid,'ad_start','0'); k=await db.get_setting(bid,'ad_movie','0')
     await m.answer('✅ Reklama saqlandi!', reply_markup=ads_menu(s=='1', k=='1'))
@@ -1711,6 +1723,75 @@ async def child_stats(m:Message):
         f"🔥 TOP 5:\n{top_txt}",
         reply_markup=kino_admin_menu()
     )
+
+@child_router.message(F.text=='👥 Foydalanuvchilar')
+async def child_users_panel(m:Message, state:FSMContext):
+    if not await is_child_admin(m): return
+    bid=await runtime_db_id(m.bot.id)
+    st=await db.child_users_stats(bid)
+    await m.answer(
+        "👥 Foydalanuvchilar bo‘limi\n\n"
+        f"📊 Jami: {st['total']} ta\n"
+        f"🟢 24 soat aktiv: {st['active24']} ta\n"
+        f"🟢 7 kun aktiv: {st['active7']} ta\n"
+        f"💎 Premium: {st['premium']} ta\n"
+        f"🚫 Bloklangan: {st['blocked']} ta\n\n"
+        "Kerakli amalni tanlang:",
+        reply_markup=rkb([
+            ['📋 Foydalanuvchilar ro‘yxati'],
+            ['🔎 Foydalanuvchi qidirish'],
+            ['🚫 Bloklangan foydalanuvchilar'],
+            nav_row(),
+        ])
+    )
+
+@child_router.message(F.text=='📋 Foydalanuvchilar ro‘yxati')
+async def child_users_list(m:Message):
+    if not await is_child_admin(m): return
+    bid=await runtime_db_id(m.bot.id)
+    rows=await db.child_users_list(bid, 30)
+    if not rows:
+        return await m.answer('📋 Hali foydalanuvchilar yo‘q.', reply_markup=kino_admin_menu())
+    txt='📋 Oxirgi foydalanuvchilar:\\n\\n'
+    for r in rows:
+        txt += f"👤 {r['user_id']} | 👁 {r['views']} | 🕒 {fmt_dt(r['last_seen'])}\\n"
+    await m.answer(txt, reply_markup=rkb([['🔎 Foydalanuvchi qidirish'], nav_row()]))
+
+@child_router.message(F.text=='🔎 Foydalanuvchi qidirish')
+@child_router.message(F.text=='🔍 Foydalanuvchi qidirish')
+async def child_user_search1(m:Message, state:FSMContext):
+    if not await is_child_admin(m): return
+    await state.set_state('child_user_search')
+    await m.answer('🔎 Foydalanuvchi ID raqamini yuboring:', reply_markup=rkb([['◀️ Orqaga']]))
+
+@child_router.message(StateFilter('child_user_search'))
+async def child_user_search2(m:Message, state:FSMContext):
+    if m.text=='◀️ Orqaga':
+        await state.clear()
+        return await child_users_panel(m,state)
+    raw=(m.text or '').strip()
+    if not raw.isdigit():
+        return await m.answer('❌ Faqat raqam ID yuboring.')
+    bid=await runtime_db_id(m.bot.id)
+    info=await db.child_user_search(bid, int(raw))
+    prem='Yo‘q'
+    if int(info['premium_until'] or 0) > int(time.time()):
+        prem='Bor, tugashi: '+fmt_dt(info['premium_until'])
+    await state.clear()
+    await m.answer(
+        f"👤 User ID: {info['user_id']}\\n"
+        f"👁 Ko‘rishlar: {info['views']} ta\\n"
+        f"🕒 Oxirgi aktiv: {fmt_dt(info['last_seen']) if info['last_seen'] else 'yo‘q'}\\n"
+        f"💎 Premium: {prem}",
+        reply_markup=rkb([['🔎 Foydalanuvchi qidirish'], nav_row()])
+    )
+
+@child_router.message(F.text=='🚫 Bloklangan foydalanuvchilar')
+async def child_blocked_users(m:Message):
+    if not await is_child_admin(m): return
+    await m.answer('🚫 Bloklangan foydalanuvchilar hozircha yo‘q.\\n\\nKeyingi versiyada block/unblock qo‘shiladi.', reply_markup=rkb([nav_row()]))
+
+
 @child_router.message(F.text=='👮 Admin log')
 async def admin_logs(m:Message):
     if not await is_child_admin(m): return
@@ -1728,8 +1809,30 @@ async def broadcast3(m:Message,state:FSMContext):
         return await m.answer('🔘 Tugma formatini shu tarzda yozing:\n[Tugma matni|Tugma linki]\n\nMisol:\n[Instagram|instagram.com]')
     if m.text.strip()!='✅ Boshlash': await state.clear(); return await m.answer('❌ Bekor qilindi', reply_markup=kino_admin_menu())
     d=await state.get_data(); await state.clear(); await m.answer('✅ Xabar yuborish boshlandi. Katta bazada flood limitdan saqlanish uchun sekin yuboriladi.', reply_markup=kino_admin_menu())
-@child_router.message(F.text.in_({'👥 Foydalanuvchilar','⚡ Avtomatik to‘lov tizimlari','📝 Oddiy to‘lov tizimlari','👥 Oddiy (🔒 Ruxsat berish)','🌟 Premium (🔒 Ruxsat berish)'}))
+@child_router.message(F.text.in_({'⚡ Avtomatik to‘lov tizimlari','📝 Oddiy to‘lov tizimlari','👥 Oddiy (🔒 Ruxsat berish)','🌟 Premium (🔒 Ruxsat berish)'}))
 async def child_stubs(m:Message): await m.answer('✅ Bo‘lim tayyor. Kerakli sozlamalarni yuqoridagi tugmalardan boshqaring.')
+
+
+
+async def send_ad_preview(m:Message, data:dict, text_prefix='👆 Reklama shunday ko‘rinadi.'):
+    markup=ad_buttons_markup(data.get('buttons',''))
+    text=data.get('text','') or ''
+    mt=data.get('media_type','text')
+    fid=data.get('file_id','')
+    try:
+        if mt=='photo' and fid:
+            await m.answer_photo(fid, caption=text, reply_markup=markup)
+        elif mt=='video' and fid:
+            await m.answer_video(fid, caption=text, reply_markup=markup)
+        elif mt=='document' and fid:
+            await m.answer_document(fid, caption=text, reply_markup=markup)
+        elif mt=='animation' and fid:
+            await m.answer_animation(fid, caption=text, reply_markup=markup)
+        else:
+            await m.answer(text or '📢 Reklama', reply_markup=markup, link_preview_options=NO_PREVIEW)
+    except Exception:
+        await m.answer(text or '📢 Reklama', reply_markup=markup, link_preview_options=NO_PREVIEW)
+    await m.answer(text_prefix, reply_markup=ad_confirm_menu(), link_preview_options=NO_PREVIEW)
 
 
 def ad_buttons_markup(raw:str):

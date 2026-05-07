@@ -745,3 +745,34 @@ async def activate_platform_for_bot(bot_id:int, tariff_id:int, days:int=30):
         await db.commit()
 
     return until
+
+
+# ===== CHILD USERS PANEL HELPERS =====
+async def child_users_stats(bot_id:int):
+    now=int(time.time())
+    async with conn() as db:
+        total=(await (await db.execute("SELECT COUNT(DISTINCT user_id) c FROM movie_views WHERE bot_id=?", (bot_id,))).fetchone())['c']
+        active24=(await (await db.execute("SELECT COUNT(DISTINCT user_id) c FROM movie_views WHERE bot_id=? AND created_at>?", (bot_id, now-86400))).fetchone())['c']
+        active7=(await (await db.execute("SELECT COUNT(DISTINCT user_id) c FROM movie_views WHERE bot_id=? AND created_at>?", (bot_id, now-7*86400))).fetchone())['c']
+        premium=(await (await db.execute("SELECT COUNT(*) c FROM premium WHERE bot_id=? AND until_ts>?", (bot_id, now))).fetchone())['c']
+        return {"total":total, "active24":active24, "active7":active7, "premium":premium, "blocked":0, "left":0}
+
+async def child_users_list(bot_id:int, limit:int=30):
+    async with conn() as db:
+        cur=await db.execute("""
+            SELECT user_id, MAX(created_at) last_seen, COUNT(*) views
+            FROM movie_views
+            WHERE bot_id=?
+            GROUP BY user_id
+            ORDER BY last_seen DESC
+            LIMIT ?
+        """, (bot_id, limit))
+        return await cur.fetchall()
+
+async def child_user_search(bot_id:int, user_id:int):
+    async with conn() as db:
+        views=(await (await db.execute("SELECT COUNT(*) c FROM movie_views WHERE bot_id=? AND user_id=?", (bot_id,user_id))).fetchone())['c']
+        last=(await (await db.execute("SELECT MAX(created_at) t FROM movie_views WHERE bot_id=? AND user_id=?", (bot_id,user_id))).fetchone())['t']
+        prem=await db.execute("SELECT until_ts FROM premium WHERE bot_id=? AND user_id=?", (bot_id,user_id))
+        pr=await prem.fetchone()
+        return {"user_id":user_id, "views":views, "last_seen":last or 0, "premium_until":(pr['until_ts'] if pr else 0)}
