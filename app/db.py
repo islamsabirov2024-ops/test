@@ -716,3 +716,16 @@ async def db_cleanup(bot_id:int=0, days:int=30):
             deleted["expired_premium"] = 0
         await db.commit()
     return deleted
+
+
+async def activate_platform_for_bot(bot_id:int, tariff_id:int, days:int=30):
+    tariff = await platform_tariff(tariff_id)
+    until = int(time.time()) + int(days) * 86400
+    limit = int(tariff['daily_limit'] or 0) if tariff else 300
+    async with conn() as db:
+        await db.execute(
+            "UPDATE bots SET platform_tariff_id=?, platform_until=?, daily_limit=?, status='active', auto_paused=0 WHERE id=?",
+            (int(tariff_id), until, limit, int(bot_id))
+        )
+        await db.commit()
+    return until

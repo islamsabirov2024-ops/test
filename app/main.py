@@ -1,6 +1,6 @@
 import asyncio, logging, time, re, datetime, copy
 from aiogram import Bot, Dispatcher, F, Router
-from aiogram.filters import Command, CommandStart, StateFilter, StateFilter, StateFilter
+from aiogram.filters import Command, CommandStart, StateFilter, StateFilter, StateFilter, StateFilter
 from aiogram.types import Message, CallbackQuery, LinkPreviewOptions, InlineKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -651,7 +651,121 @@ async def child_cancel(m:Message, state:FSMContext):
     adminflag= m.from_user.id==owner or is_admin(m.from_user.id) or await db.is_bot_admin(await runtime_db_id(m.bot.id),m.from_user.id)
     await m.answer('✅ Jarayon bekor qilindi.', reply_markup=kino_user_menu(adminflag))
 
-@main_router.message(F.text)
+
+@main_router.message(CreateBot.token)
+async def create_bot_token(m:Message, state:FSMContext):
+    token=(m.text or '').strip()
+    if token in {'◀️ Orqaga','/cancel'}:
+        await state.clear()
+        return await m.answer('✅ Jarayon bekor qilindi.', reply_markup=main_menu())
+
+    data=await state.get_data()
+    price=int(data.get('price') or 0)
+    tariff_id=int(data.get('platform_tariff_id') or 0)
+
+    # Token formatni tez tekshirish
+    if ':' not in token or len(token) < 30:
+        return await m.answer(
+            '❌ Token noto‘g‘ri ko‘rinadi.\n\n'
+            'BotFatherdan olingan tokenni to‘liq yuboring.\n'
+            'Masalan: 123456789:AA....'
+        )
+
+    # Balansni yana bir marta tekshiramiz va pulni yechamiz
+    u=await db.get_user(m.from_user.id)
+    bal=int(u['balance']) if u else 0
+    if bal < price:
+        await state.clear()
+        return await m.answer(
+            f"❌ Balans yetarli emas.\n\n"
+            f"💰 Tarif narxi: {fmt_money(price)} so‘m\n"
+            f"💳 Sizda: {fmt_money(bal)} so‘m\n\n"
+            "Avval 💳 Hisob to‘ldirish bo‘limidan balans to‘ldiring.",
+            reply_markup=main_menu()
+        )
+
+    # Token real ishlaydimi tekshiramiz
+    test_bot=None
+    try:
+        test_bot=Bot(token)
+        me=await test_bot.get_me()
+    except Exception as e:
+        return await m.answer(
+            '❌ Token ishlamadi.\n\n'
+            'Tekshiring:\n'
+            '1. Tokenni BotFatherdan to‘liq copy qiling\n'
+            '2. Bot tokenini boshqa joyda ishlatayotgan bo‘lmang\n'
+            f'Xato: {str(e)[:120]}'
+        )
+    finally:
+        if test_bot:
+            try:
+                await test_bot.session.close()
+            except Exception:
+                pass
+
+    # Dublikat token bo‘lsa xato bermasdan tushunarli javob
+    old_bot=None
+    try:
+        for r in await db.bots():
+            if str(r['token']) == token:
+                old_bot=r
+                break
+    except Exception:
+        old_bot=None
+    if old_bot:
+        await state.clear()
+        return await m.answer(
+            f"❌ Bu token oldin qo‘shilgan.\n\n"
+            f"Bot: @{old_bot['username']}\n"
+            "Botlarim bo‘limidan boshqaring yoki boshqa token yuboring.",
+            reply_markup=main_menu()
+        )
+
+    # Pul yechish
+    paid=await db.take_balance(m.from_user.id, price)
+    if not paid:
+        await state.clear()
+        return await m.answer('❌ Balans yechishda xatolik. Qayta urinib ko‘ring.', reply_markup=main_menu())
+
+    # Botni DBga saqlash
+    try:
+        bot_id=await db.add_bot(m.from_user.id, token, me.username, me.full_name or me.username)
+        await db.activate_platform_for_bot(bot_id, tariff_id, 30)
+    except Exception as e:
+        # saqlashda xato bo‘lsa pulni qaytarish
+        try:
+            await db.add_balance(m.from_user.id, price)
+        except Exception:
+            pass
+        await state.clear()
+        return await m.answer(
+            '❌ Botni saqlashda xatolik bo‘ldi. Balans qaytarildi.\n\n'
+            f'Xato: {str(e)[:120]}',
+            reply_markup=main_menu()
+        )
+
+    # Ishga tushirish
+    started=False
+    try:
+        started=await start_child(bot_id)
+    except Exception:
+        started=False
+
+    await state.clear()
+    await m.answer(
+        f"✅ Kino Bot yaratildi!\n\n"
+        f"🤖 Bot: @{me.username}\n"
+        f"🆔 ID: {bot_id}\n"
+        f"💰 Yechildi: {fmt_money(price)} so‘m\n"
+        f"⏳ Muddat: 30 kun\n\n"
+        f"{'🟢 Bot ishga tushdi.' if started else '🟡 Bot saqlandi. Manager 30 soniya ichida ishga tushiradi.'}\n\n"
+        "Endi yangi botga kiring va /panel bosing.",
+        reply_markup=main_menu()
+    )
+
+
+@main_router.message(StateFilter(None), F.text)
 async def main_stub(m:Message): await m.answer('✅ Bu bo‘lim admin paneldan sozlanadi.', reply_markup=main_menu())
 
 # CHILD BASIC
