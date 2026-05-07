@@ -337,8 +337,9 @@ def bot_settings_inline(bot_id:int):
     b.button(text='🔀 Botni O‘tkazish', callback_data=f'bot_transfer:{bot_id}')
     b.button(text='🆔 Admin ID', callback_data=f'bot_adminid:{bot_id}')
     b.button(text='🧹 Keshni Tozalash', callback_data=f'bot_clearcache:{bot_id}')
+    b.button(text='💳 Karta Sozlash', callback_data=f'bot_card:{bot_id}')
     b.button(text='◀️ Orqaga', callback_data=f'bot_manage:{bot_id}')
-    b.adjust(2,2,1,1)
+    b.adjust(2,2,1,1,1)
     return b.as_markup()
 
 def platform_admin_menu():

@@ -1,4 +1,4 @@
-import asyncio, logging, time, re, datetime
+import asyncio, logging, time, re, datetime, copy
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command, CommandStart, StateFilter, StateFilter, StateFilter
 from aiogram.types import Message, CallbackQuery, LinkPreviewOptions, InlineKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
@@ -264,8 +264,8 @@ async def create_bot_token(m:Message, state:FSMContext):
         await db.add_pay_method(bot_id,'Karta','Karta raqamini admin paneldan kiriting')
         if platform_tariff_id: await db.set_bot_platform(bot_id, platform_tariff_id, 30)
         await db.set_setting(bot_id,'referral_bonus','0'); await db.set_setting(bot_id,'sub_fake_verify','0'); await db.set_setting(bot_id,'premium_enabled','1'); await db.set_setting(bot_id,'text_Premium_kino_xabari','🔒 Bu kino premium. Ko‘rish uchun 💎 Premium olish tugmasini bosing.'); await db.set_setting(bot_id,'antispam_enabled','1'); await db.set_setting(bot_id,'antispam_limit','5'); await db.set_setting(bot_id,'antispam_window','3'); await db.set_setting(bot_id,'antispam_block','10'); await db.set_setting(bot_id,'ad_movie_interval','3')
-        await start_child(bot_id)
-        await m.answer(f'✅ Kino Bot yaratildi: @{me.username}\n🆔 ID: {bot_id}\n\nBotga kiring va /panel bosing.', reply_markup=main_menu())
+        started = await start_child(bot_id)
+        await m.answer(f'✅ Kino Bot yaratildi: @{me.username}\n🆔 ID: {bot_id}\n\n' + ('🟢 Bot ishga tushdi.' if started else '🟡 Bot saqlandi, manager ishga tushiradi.') + '\nBotga kiring va /panel bosing.', reply_markup=main_menu())
     except Exception as e: await m.answer(f'❌ Saqlashda xato: {e}')
     await state.clear()
 @main_router.message(F.text=='🤖 Botlarim')
@@ -364,6 +364,65 @@ async def bot_settings_cb(c:CallbackQuery):
         reply_markup=bot_settings_inline(bot_id)
     )
     await c.answer()
+
+
+@main_router.callback_query(F.data.startswith('bot_card:'))
+async def bot_card_cb(c:CallbackQuery, state:FSMContext):
+    bot_id=int(c.data.split(':')[1])
+    r=await db.bot_by_id(bot_id)
+    if not r or (r['owner_id']!=c.from_user.id and not is_admin(c.from_user.id)):
+        return await c.answer('Ruxsat yo‘q', show_alert=True)
+
+    current=''
+    try:
+        methods=await db.pay_methods(bot_id)
+        for pm in methods:
+            if str(pm['name']).lower() == 'karta':
+                current=str(pm['value'])
+                break
+    except Exception:
+        pass
+
+    await state.set_state('main_set_child_card')
+    await state.update_data(bot_id=bot_id)
+    await c.message.answer(
+        f"💳 @{r['username']} uchun karta raqamini sozlash\n\n"
+        f"Hozirgi karta: {current or 'kiritilmagan'}\n\n"
+        "Yangi karta raqamini yuboring.\n"
+        "Masalan:\n"
+        "8600 0000 0000 0000\n"
+        "SABIROV ISLOMBEK",
+        reply_markup=rkb([['◀️ Orqaga']])
+    )
+    await c.answer()
+
+@main_router.message(StateFilter('main_set_child_card'))
+async def main_set_child_card(m:Message, state:FSMContext):
+    if m.text=='◀️ Orqaga':
+        await state.clear()
+        return await m.answer('Bekor qilindi.', reply_markup=main_menu())
+
+    data=await state.get_data()
+    bot_id=int(data.get('bot_id',0))
+    r=await db.bot_by_id(bot_id)
+    if not r or (r['owner_id']!=m.from_user.id and not is_admin(m.from_user.id)):
+        await state.clear()
+        return await m.answer('⛔ Ruxsat yo‘q', reply_markup=main_menu())
+
+    card=(m.text or '').strip()
+    if len(card) < 8:
+        return await m.answer('❌ Karta ma’lumoti juda qisqa. Karta raqami va egasini yuboring.')
+
+    await db.upsert_pay_method(bot_id, 'Karta', card)
+    await state.clear()
+    await m.answer(
+        f"✅ Karta raqami saqlandi!\n\n"
+        f"🤖 Bot: @{r['username']}\n"
+        f"💳 Karta:\n{card}\n\n"
+        "Endi shu kino bot ichida premium oladigan userlarga shu karta ko‘rinadi.",
+        reply_markup=main_menu()
+    )
+
 
 @main_router.callback_query(F.data.startswith('bot_upgrade:'))
 async def bot_upgrade_cb(c:CallbackQuery):
@@ -528,7 +587,7 @@ async def topup(m:Message, state:FSMContext):
     await state.clear()
     await m.answer(
         "💳 To‘lov tizimini tanlang:\n\n"
-        "To‘lovni amalga oshirasiz, chek yuborasiz, admin tasdiqlagandan keyin balans avtomatik qo‘shiladi.",
+        "Bu yer asosiy bot balansi uchun. Bot yaratish/tarif uchun balans to‘ldirasiz.\n\nO‘z kino botingiz karta raqamini qo‘yish uchun:\n🤖 Botlarim → Botni sozlash → 💳 Karta Sozlash\n\nTo‘lovni amalga oshirasiz, chek yuborasiz, admin tasdiqlagandan keyin balans avtomatik qo‘shiladi.",
         reply_markup=topup_menu()
     )
 
@@ -1902,41 +1961,149 @@ async def background_worker(bot:Bot, bot_id:int):
         await asyncio.sleep(60)
 
 async def start_child(bot_id:int):
-    if bot_id in child_tasks and not child_tasks[bot_id].done():
-        return
+    """
+    Har bir child bot alohida polling task bo‘lib ishlaydi.
+    MUHIM: aiogram Router bitta Dispatcherga ulanadi. Shuning uchun har child uchun
+    child_router deepcopy qilinadi. Aks holda 2-bot ishlamay qoladi.
+    """
+    bot_id=int(bot_id)
+    old=child_tasks.get(bot_id)
+    if old and not old.done():
+        return True
+
     r=await db.bot_by_id(bot_id)
-    if not r or r['status']!='active':
-        return
+    if not r:
+        return False
+    if r['status']!='active':
+        return False
+
     ok, used, limit, _ = await db.platform_limit_ok(bot_id)
     if not ok:
         await db.auto_pause_limit(bot_id, 'expired_or_limit')
-        return
-    async def runner():
-        bot=Bot(r['token']); dp=Dispatcher(storage=MemoryStorage()); dp.include_router(child_router)
-        log.info('Child bot started @%s', r['username'])
-        bg=asyncio.create_task(background_worker(bot,bot_id))
         try:
-            # Webhook qoldig‘i bo‘lsa polling bilan conflict bermasligi uchun tozalaydi.
-            try: await bot.delete_webhook(drop_pending_updates=True)
-            except Exception: pass
-            await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
-        except TelegramConflictError as e:
-            log.error('Child bot conflict @%s: %s', r['username'], e)
-            await db.record_runtime_event(bot_id, 'error', 'telegram_conflict', str(e))
-        except asyncio.CancelledError:
+            await db.record_runtime_event(bot_id, 'warning', 'child_not_started', 'platform expired or limit reached')
+        except Exception:
             pass
+        return False
+
+    async def runner():
+        bot=None
+        bg=None
+        username=str(r['username'] or bot_id)
+        try:
+            bot=Bot(r['token'])
+
+            # Tokenni oldindan tekshiramiz
+            me=await bot.get_me()
+            username=me.username or username
+
+            # Har bir child bot uchun mustaqil Dispatcher + mustaqil Router copy.
+            dp=Dispatcher(storage=MemoryStorage())
+            dp.include_router(copy.deepcopy(child_router))
+
+            log.info('Child bot started @%s id=%s', username, bot_id)
+            try:
+                await db.record_runtime_event(bot_id, 'info', 'child_started', f'@{username}')
+            except Exception:
+                pass
+
+            bg=asyncio.create_task(background_worker(bot,bot_id))
+
+            try:
+                await bot.delete_webhook(drop_pending_updates=True)
+            except Exception:
+                pass
+
+            await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+
+        except TelegramConflictError as e:
+            log.error('Child bot conflict @%s: %s', username, e)
+            try:
+                await db.record_runtime_event(bot_id, 'error', 'telegram_conflict', str(e))
+            except Exception:
+                pass
+            # Conflict bo‘lsa statusni active qoldiramiz, manager keyin qayta urinadi.
+            await asyncio.sleep(5)
+
+        except asyncio.CancelledError:
+            log.info('Child bot stopped @%s id=%s', username, bot_id)
+            raise
+
         except Exception as e:
-            log.exception('Child bot crashed @%s', r['username'])
-            await db.record_runtime_event(bot_id, 'error', 'child_crash', str(e))
+            log.exception('Child bot crashed @%s id=%s', username, bot_id)
+            try:
+                await db.record_runtime_event(bot_id, 'error', 'child_crash', str(e))
+            except Exception:
+                pass
+
         finally:
-            bg.cancel(); await bot.session.close()
+            if bg:
+                bg.cancel()
+            if bot:
+                try:
+                    await bot.session.close()
+                except Exception:
+                    pass
+
     child_tasks[bot_id]=asyncio.create_task(runner())
+    return True
+
 async def stop_child(bot_id:int):
+    bot_id=int(bot_id)
     t=child_tasks.get(bot_id)
-    if t and not t.done(): t.cancel()
+    if t and not t.done():
+        t.cancel()
+        try:
+            await t
+        except Exception:
+            pass
+    child_tasks.pop(bot_id, None)
+    return True
+
 async def start_all_children():
-    for r in await db.bots():
-        if r['status']=='active': await start_child(r['id'])
+    rows=await db.bots()
+    started=0
+    for r in rows:
+        try:
+            if r['status']=='active':
+                ok=await start_child(int(r['id']))
+                if ok:
+                    started+=1
+        except Exception as e:
+            log.warning('start_all_children failed for %s: %s', r['id'], e)
+    log.info('Child manager started %s active bots', started)
+    return started
+
+async def child_manager_worker():
+    """
+    Har 30 sekundda DBdagi active botlarni tekshiradi.
+    Yangi bot yaratilsa yoki task yiqilsa avtomatik qayta ishga tushiradi.
+    """
+    while True:
+        try:
+            rows=await db.bots()
+            active_ids=set()
+            for r in rows:
+                bot_id=int(r['id'])
+                if r['status']=='active':
+                    active_ids.add(bot_id)
+                    t=child_tasks.get(bot_id)
+                    if not t or t.done():
+                        await start_child(bot_id)
+                else:
+                    t=child_tasks.get(bot_id)
+                    if t and not t.done():
+                        await stop_child(bot_id)
+
+            # DBda yo‘q yoki active emas bo‘lgan eski tasklarni to‘xtatamiz
+            for bot_id in list(child_tasks.keys()):
+                if bot_id not in active_ids:
+                    await stop_child(bot_id)
+
+        except Exception as e:
+            log.warning('child_manager_worker error: %s', e)
+
+        await asyncio.sleep(30)
 
 async def broadcast_worker():
     """Reklama/xabarlarni navbat bilan yuboradi, Telegram limitdan saqlaydi."""
@@ -1952,28 +2119,16 @@ async def broadcast_worker():
         await asyncio.sleep(0.07)
 
 async def start_all_active_children():
-    """Server restart bo‘lganda active child botlarni qayta ishga tushiradi."""
-    try:
-        rows = await db.bots()
-        for r in rows:
-            try:
-                if str(r['status']) == 'active':
-                    await start_child(int(r['id']))
-            except Exception as e:
-                log.warning("Child bot start failed: %s", e)
-    except Exception as e:
-        log.warning("start_all_active_children failed: %s", e)
+    return await start_all_children()
+
 
 async def main():
     if not BOT_TOKEN: raise RuntimeError('BOT_TOKEN env kerak')
     await db.init_db()
-    await start_all_active_children()
-    asyncio.create_task(broadcast_worker())
     await db.ensure_platform_tables()
-    try:
-        await start_all_children()
-    except NameError:
-        pass
+    await start_all_children()
+    asyncio.create_task(child_manager_worker())
+    asyncio.create_task(broadcast_worker())
     bot=Bot(BOT_TOKEN); dp=Dispatcher(storage=MemoryStorage()); dp.include_router(main_router)
     log.info('%s started', BOT_NAME)
     try:
