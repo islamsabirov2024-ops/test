@@ -245,30 +245,65 @@ async def create_kino_confirm(m:Message, state:FSMContext):
     rows=await db.platform_tariffs(True)
     await m.answer('📦 Avval tarif tanlang:', reply_markup=platform_tariffs_inline(rows, 0, 'platform_select'))
 
+@main_router.message(F.text=='💳 Hisob to\'ldirish')
+async def topup(m:Message, state:FSMContext):
+    await state.clear()
+    card=await db.get_global('main_payment_card','')
+    payme_enabled=await db.get_global('payme_enabled','0')
+    payme_link=await db.get_global('payme_link','')
+    txt=(
+        "💳 Hisob to‘ldirish\n\n"
+        "Bu yer asosiy bot balansi uchun. Bot yaratish/tarif uchun balans to‘ldirasiz.\n\n"
+        "✅ 2 xil usul bor:\n"
+        "1️⃣ Karta orqali — chek yuborasiz, admin tasdiqlaydi\n"
+        "2️⃣ Payme auto — Payme yoqilgan bo‘lsa link orqali to‘laysiz\n\n"
+    )
+    if card:
+        txt += f"💳 Karta:\n{card}\n\n"
+    else:
+        txt += "❌ Karta raqami kiritilmagan.\n\n"
+    if payme_enabled=='1' and payme_link:
+        txt += f"⚪ Payme: ✅ Yoniq\n{payme_link}"
+    else:
+        txt += "⚪ Payme: ❌ O‘chiq"
+    await m.answer(txt, reply_markup=topup_menu(), link_preview_options=NO_PREVIEW)
+
 @main_router.message(F.text.in_({'💳 Karta orqali to‘lash','⚪ Payme (Avto)','🔵 Click (Avto)','💳 Karta (Avto)','💳 Humo'}))
 async def topup_choose_method(m:Message, state:FSMContext):
-    method='💳 Karta'
+    txt=(m.text or '').strip()
+    if txt=='⚪ Payme (Avto)':
+        enabled=await db.get_global('payme_enabled','0')
+        link=await db.get_global('payme_link','')
+        if enabled!='1' or not link:
+            return await m.answer('❌ Payme hozircha yoqilmagan.\n\nKarta orqali to‘lov qiling yoki admin Payme sozlasin.', reply_markup=topup_menu(), link_preview_options=NO_PREVIEW)
+        await state.set_state("main_topup_amount")
+        await state.update_data(topup_method='⚪ Payme', topup_card=link)
+        return await m.answer(
+            '⚪ Payme orqali to‘lov\n\n'
+            f'{link}\n\n'
+            'To‘lov qilgandan keyin summani yozing va chek yuboring.\n\n'
+            '💰 To‘lov miqdorini kiriting:\nMinimal: 1 000 so‘m\nMasalan: 18000',
+            reply_markup=rkb([['◀️ Orqaga']]),
+            link_preview_options=NO_PREVIEW
+        )
+
     card=await db.get_global('main_payment_card','')
     if not card:
         if is_admin(m.from_user.id):
-            return await m.answer(
-                '❌ Avval asosiy karta raqamini sozlang.\\n\\n'
-                'Yo‘li: /admin → ⚙️ Global sozlamalar → 💳 Asosiy karta raqami',
-                reply_markup=main_menu()
-            )
+            return await m.answer('❌ Avval asosiy karta raqamini sozlang.\n\nYo‘li: /admin → ⚙️ Global sozlamalar → 💳 Karta qo‘shish', reply_markup=main_menu())
         return await m.answer('❌ Hozircha karta raqami kiritilmagan. Admin bilan bog‘laning.', reply_markup=main_menu())
 
     await state.set_state("main_topup_amount")
-    await state.update_data(topup_method=method, topup_card=card)
+    await state.update_data(topup_method='💳 Karta', topup_card=card)
     await m.answer(
-        "💳 Karta orqali balans to‘ldirish\\n\\n"
-        f"💳 Karta:\\n{card}\\n\\n"
-        "Pulni shu kartaga tashlang va summani yozing.\\n\\n"
-        "💰 To‘lov miqdorini kiriting:\\n"
-        "Minimal: 1 000 so‘m\\n"
-        "Masalan: 18000",
-        reply_markup=rkb([['◀️ Orqaga']])
+        "💳 Karta orqali balans to‘ldirish\n\n"
+        f"💳 Karta:\n{card}\n\n"
+        "Pulni shu kartaga tashlang va summani yozing.\n\n"
+        "💰 To‘lov miqdorini kiriting:\nMinimal: 1 000 so‘m\nMasalan: 18000",
+        reply_markup=rkb([['◀️ Orqaga']]),
+        link_preview_options=NO_PREVIEW
     )
+
 
 @main_router.message(StateFilter("main_topup_amount"))
 async def topup_amount(m:Message, state:FSMContext):
@@ -511,6 +546,75 @@ async def set_main_card2(m:Message,state:FSMContext):
     await db.set_global('main_payment_card', card)
     await state.clear()
     await m.answer('✅ Asosiy karta raqami saqlandi!\n\n'+card, reply_markup=global_settings_menu())
+
+
+
+@main_router.message(F.text.in_({'💳 Asosiy karta raqami','💳 Karta qo‘shish'}))
+async def set_main_card1(m:Message,state:FSMContext):
+    if not is_admin(m.from_user.id):
+        return await m.answer('⛔ Ruxsat yo‘q')
+    current=await db.get_global('main_payment_card','')
+    await state.set_state('set_main_payment_card')
+    await m.answer(
+        '💳 Asosiy bot uchun karta raqamini yuboring.\n\n'
+        f'Hozirgi karta:\n{current or "kiritilmagan"}\n\n'
+        'Masalan:\n8600 0000 0000 0000\nSABIROV ISLOMBEK',
+        reply_markup=rkb([['◀️ Orqaga']])
+    )
+
+@main_router.message(StateFilter('set_main_payment_card'))
+async def set_main_card2(m:Message,state:FSMContext):
+    if m.text=='◀️ Orqaga':
+        await state.clear()
+        return await m.answer('Bekor qilindi.', reply_markup=global_settings_menu())
+    card=(m.text or '').strip()
+    if len(card)<8:
+        return await m.answer('❌ Karta ma’lumoti juda qisqa. Karta raqami va egasini yuboring.')
+    await db.set_global('main_payment_card', card)
+    await state.clear()
+    await m.answer('✅ Asosiy karta raqami saqlandi!\n\n'+card, reply_markup=global_settings_menu())
+
+@main_router.message(F.text=='🗑 Karta o‘chirish')
+async def delete_main_card(m:Message):
+    if not is_admin(m.from_user.id):
+        return await m.answer('⛔ Ruxsat yo‘q')
+    await db.set_global('main_payment_card','')
+    await m.answer('🗑 Asosiy karta raqami o‘chirildi.', reply_markup=global_settings_menu())
+
+@main_router.message(F.text=='🔘 Payme ON/OFF')
+async def payme_toggle(m:Message):
+    if not is_admin(m.from_user.id):
+        return await m.answer('⛔ Ruxsat yo‘q')
+    cur=await db.get_global('payme_enabled','0')
+    new='0' if cur=='1' else '1'
+    await db.set_global('payme_enabled', new)
+    await m.answer(f"⚪ Payme holati: {'✅ Yoniq' if new=='1' else '❌ O‘chiq'}", reply_markup=global_settings_menu())
+
+@main_router.message(F.text=='⚪ Payme sozlash')
+async def payme_setup1(m:Message,state:FSMContext):
+    if not is_admin(m.from_user.id):
+        return await m.answer('⛔ Ruxsat yo‘q')
+    current=await db.get_global('payme_link','')
+    await state.set_state('set_payme_link')
+    await m.answer(
+        '⚪ Payme to‘lov linkini yoki instruktsiyasini yuboring.\n\n'
+        f'Hozirgi:\n{current or "kiritilmagan"}\n\n'
+        'Masalan: https://payme.uz/... yoki Payme merchant link',
+        reply_markup=rkb([['◀️ Orqaga']])
+    )
+
+@main_router.message(StateFilter('set_payme_link'))
+async def payme_setup2(m:Message,state:FSMContext):
+    if m.text=='◀️ Orqaga':
+        await state.clear()
+        return await m.answer('Bekor qilindi.', reply_markup=global_settings_menu())
+    val=(m.text or '').strip()
+    if len(val)<5:
+        return await m.answer('❌ Payme link/instruktsiya juda qisqa.')
+    await db.set_global('payme_link', val)
+    await db.set_global('payme_enabled','1')
+    await state.clear()
+    await m.answer('✅ Payme sozlandi va yoqildi!\n\n'+val, reply_markup=global_settings_menu())
 
 
 @main_router.message(F.text=='📱 Shaxsiy kabinet')
