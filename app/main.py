@@ -245,361 +245,27 @@ async def create_kino_confirm(m:Message, state:FSMContext):
     rows=await db.platform_tariffs(True)
     await m.answer('📦 Avval tarif tanlang:', reply_markup=platform_tariffs_inline(rows, 0, 'platform_select'))
 
-@main_router.message(F.text.in_({'🚀 Nakrutka Bot','💵 Pul Bot','📥 OpenBudget Bot','🛍 Mahsulot Bot','🔐 VipKanal Bot','🚀 Smm Bot [💎 PREMIUM]','🎥 ProKino Bot [💎 PREMIUM]'}))
-async def other_bot_type(m:Message):
-    await m.answer('⏳ Bu bot turi keyingi versiyada ulanadi. Hozir 100% ishlaydigan tayyor template: 🎬 Kino Bot.', reply_markup=bot_types_menu())
-
-@main_router.message(CreateBot.token)
-async def create_bot_token(m:Message, state:FSMContext):
-    data=await state.get_data(); token=m.text.strip(); price=int(data.get('price',0) or 0); platform_tariff_id=int(data.get('platform_tariff_id',0) or 0)
-    try:
-        b=Bot(token); me=await b.get_me(); await b.session.close()
-    except Exception as e: return await m.answer(f'❌ Token xato: {e}')
-    try:
-        if price > 0:
-            paid=await db.take_balance(m.from_user.id, price)
-            if not paid: return await m.answer('❌ Balans yetarli emas.', reply_markup=main_menu())
-        bot_id=await db.add_bot(m.from_user.id, token, me.username or '', me.full_name or 'Kino Bot')
-        await db.add_tariff(bot_id,'1 kunlik Premium',1,1000); await db.add_tariff(bot_id,'3 kunlik Premium',3,5000); await db.add_tariff(bot_id,'7 kunlik Premium',7,10000)
-        await db.add_pay_method(bot_id,'Karta','Karta raqamini admin paneldan kiriting')
-        if platform_tariff_id: await db.set_bot_platform(bot_id, platform_tariff_id, 30)
-        await db.set_setting(bot_id,'referral_bonus','0'); await db.set_setting(bot_id,'sub_fake_verify','0'); await db.set_setting(bot_id,'premium_enabled','1'); await db.set_setting(bot_id,'text_Premium_kino_xabari','🔒 Bu kino premium. Ko‘rish uchun 💎 Premium olish tugmasini bosing.'); await db.set_setting(bot_id,'antispam_enabled','1'); await db.set_setting(bot_id,'antispam_limit','5'); await db.set_setting(bot_id,'antispam_window','3'); await db.set_setting(bot_id,'antispam_block','10'); await db.set_setting(bot_id,'ad_movie_interval','3')
-        started = await start_child(bot_id)
-        await m.answer(f'✅ Kino Bot yaratildi: @{me.username}\n🆔 ID: {bot_id}\n\n' + ('🟢 Bot ishga tushdi.' if started else '🟡 Bot saqlandi, manager ishga tushiradi.') + '\nBotga kiring va /panel bosing.', reply_markup=main_menu())
-    except Exception as e: await m.answer(f'❌ Saqlashda xato: {e}')
-    await state.clear()
-@main_router.message(F.text=='🤖 Botlarim')
-async def my_bots(m:Message):
-    rows=await db.bots(m.from_user.id)
-    if not rows: return await m.answer('📭 Sizda bot yo‘q. ➕ Bot yaratish ni bosing.')
-    await m.answer('🤖 Botlaringiz:')
-    for r in rows:
-        t=await db.platform_tariff_by_id(int(r['platform_tariff_id'] or 0)) if 'platform_tariff_id' in r.keys() else None
-        used=await db.platform_daily_active(r['id'])
-        limit=int(r['daily_limit'] or 0) if 'daily_limit' in r.keys() else 0
-        pct=0 if limit<=0 else min(100, round(used*100/limit))
-        limit_txt='Cheksiz' if limit<=0 else f'{fmt_money(used)} / {fmt_money(limit)} — {pct}%'
-        until=int(r['platform_until'] or 0) if 'platform_until' in r.keys() else 0
-        left=max(0, until-int(time.time()))
-        days=left//86400; hours=(left%86400)//3600; mins=(left%3600)//60
-        price_txt = (fmt_money(t['monthly_price']) + " so'm/oy") if t else "0 so'm"
-        txt=(f"🤖 Bot: @{r['username']}\n\n"
-             f"🔹 Tarif: {(t['name'] if t else 'Belgilanmagan')}\n"
-             f"📊 Kunlik faollik: {limit_txt}\n"
-             f"💵 Narx: {price_txt}\n"
-             f"⏳ Muddati: {days} kun {hours} soat {mins} daqiqa\n\n"
-             f"📅 Tarifni uzaytirish yoki o‘zgartirish uchun quyidagi tugmalardan foydalaning.")
-        await m.answer(txt, reply_markup=bot_manage_inline(r['id'], r['status']))
-@main_router.callback_query(F.data.startswith('bot_toggle:'))
-async def bot_toggle(c:CallbackQuery):
-    bot_id=int(c.data.split(':')[1]); r=await db.bot_by_id(bot_id)
-    if not r or (r['owner_id']!=c.from_user.id and not is_admin(c.from_user.id)):
-        return await c.answer('Ruxsat yo‘q', show_alert=True)
-    new='paused' if r['status']=='active' else 'active'
-    await db.set_bot_status(bot_id,new)
-    try:
-        if new=='active':
-            await start_child(bot_id)
-            txt=f"✅ @{r['username']} holati: active\n\n🟢 Bot yoqildi."
-        else:
-            await stop_child(bot_id)
-            txt=f"✅ @{r['username']} holati: paused\n\n🔴 Bot to‘xtatildi."
-        await c.message.edit_text(txt, reply_markup=bot_actions(bot_id,new))
-    except Exception:
-        await c.message.answer(f"✅ @{r['username']} holati: {new}", reply_markup=bot_actions(bot_id,new))
-    await c.answer('Bajarildi')
-@main_router.callback_query(F.data.startswith('bot_delete:'))
-async def bot_delete(c:CallbackQuery): await c.answer('Xavfsizlik uchun repo versiyada faqat pauza mavjud. O‘chirishni DB backupdan keyin qiling.', show_alert=True)
-
-@main_router.callback_query(F.data.startswith('bot_token:'))
-async def bot_token_change(c:CallbackQuery, state:FSMContext):
-    bot_id=int(c.data.split(':')[1]); r=await db.bot_by_id(bot_id)
-    if not r or (r['owner_id']!=c.from_user.id and not is_admin(c.from_user.id)): return await c.answer('Ruxsat yo‘q', show_alert=True)
-    await state.set_state(ChangeBotToken.token); await state.update_data(bot_id=bot_id)
-    await c.message.answer('🔑 Yangi bot tokenini yuboring:'); await c.answer()
-
-@main_router.message(ChangeBotToken.token)
-async def bot_token_save(m:Message, state:FSMContext):
-    data=await state.get_data(); bot_id=int(data['bot_id']); token=m.text.strip()
-    try:
-        b=Bot(token); me=await b.get_me(); await b.session.close()
-    except Exception as e: return await m.answer(f'❌ Token xato: {e}')
-    await stop_child(bot_id)
-    # SQLite uchun sodda update
-    async with db.conn() as con:
-        await con.execute('UPDATE bots SET token=?, username=?, title=? WHERE id=?',(token,me.username or '',me.full_name or 'Kino Bot',bot_id)); await con.commit()
-    runtime_cache.clear(); await start_child(bot_id); await state.clear()
-    await m.answer(f'✅ Token almashtirildi: @{me.username}', reply_markup=main_menu())
-
-@main_router.callback_query(F.data.startswith('bot_manage:'))
-async def bot_manage_cb(c:CallbackQuery):
-    bot_id=int(c.data.split(':')[1]); r=await db.bot_by_id(bot_id)
-    if not r or (r['owner_id']!=c.from_user.id and not is_admin(c.from_user.id)): return await c.answer('Ruxsat yo‘q', show_alert=True)
-    t=await db.platform_tariff_by_id(int(r['platform_tariff_id'] or 0)) if 'platform_tariff_id' in r.keys() else None
-    used=await db.platform_daily_active(bot_id); limit=int(r['daily_limit'] or 0)
-    limit_txt='Cheksiz' if limit<=0 else f'{fmt_money(used)} / {fmt_money(limit)}'
-    until=int(r['platform_until'] or 0); left=max(0,until-int(time.time())); days=left//86400; hours=(left%86400)//3600; mins=(left%3600)//60
-    price_txt = (fmt_money(t['monthly_price']) + " so'm/oy") if t else "0 so'm"
-    await c.message.answer(
-        f"🤖 Bot: @{r['username']}\n\n"
-        f"🔹 Tarif: {(t['name'] if t else 'Belgilanmagan')}\n"
-        f"📊 Kunlik faollik: {limit_txt}\n"
-        f"💵 Narx: {price_txt}\n"
-        f"⏳ Muddati: {days} kun {hours} soat {mins} daqiqa",
-        reply_markup=bot_manage_inline(bot_id,r['status'])
-    )
-    await c.answer()
-
-@main_router.callback_query(F.data.startswith('bot_settings:'))
-async def bot_settings_cb(c:CallbackQuery):
-    bot_id=int(c.data.split(':')[1]); r=await db.bot_by_id(bot_id)
-    if not r or (r['owner_id']!=c.from_user.id and not is_admin(c.from_user.id)): return await c.answer('Ruxsat yo‘q', show_alert=True)
-    await c.message.answer(
-        f"⚙️ Bot sozlamalari\n\n"
-        f"🤖 Bot: @{r['username']}\n"
-        f"🔑 Token: {str(r['token'])[:14]}...\n"
-        f"📅 Yaratilgan: {fmt_dt(r['created_at'])}\n"
-        f"👤 Admin: {r['owner_id']}\n\n"
-        f"📁 Bot turi: Kino Bot",
-        reply_markup=bot_settings_inline(bot_id)
-    )
-    await c.answer()
-
-
-@main_router.callback_query(F.data.startswith('bot_card:'))
-async def bot_card_cb(c:CallbackQuery, state:FSMContext):
-    bot_id=int(c.data.split(':')[1])
-    r=await db.bot_by_id(bot_id)
-    if not r or (r['owner_id']!=c.from_user.id and not is_admin(c.from_user.id)):
-        return await c.answer('Ruxsat yo‘q', show_alert=True)
-
-    current=''
-    try:
-        methods=await db.pay_methods(bot_id)
-        for pm in methods:
-            if str(pm['name']).lower() == 'karta':
-                current=str(pm['value'])
-                break
-    except Exception:
-        pass
-
-    await state.set_state('main_set_child_card')
-    await state.update_data(bot_id=bot_id)
-    await c.message.answer(
-        f"💳 @{r['username']} uchun karta raqamini sozlash\n\n"
-        f"Hozirgi karta: {current or 'kiritilmagan'}\n\n"
-        "Yangi karta raqamini yuboring.\n"
-        "Masalan:\n"
-        "8600 0000 0000 0000\n"
-        "SABIROV ISLOMBEK",
-        reply_markup=rkb([['◀️ Orqaga']])
-    )
-    await c.answer()
-
-@main_router.message(StateFilter('main_set_child_card'))
-async def main_set_child_card(m:Message, state:FSMContext):
-    if m.text=='◀️ Orqaga':
-        await state.clear()
-        return await m.answer('Bekor qilindi.', reply_markup=main_menu())
-
-    data=await state.get_data()
-    bot_id=int(data.get('bot_id',0))
-    r=await db.bot_by_id(bot_id)
-    if not r or (r['owner_id']!=m.from_user.id and not is_admin(m.from_user.id)):
-        await state.clear()
-        return await m.answer('⛔ Ruxsat yo‘q', reply_markup=main_menu())
-
-    card=(m.text or '').strip()
-    if len(card) < 8:
-        return await m.answer('❌ Karta ma’lumoti juda qisqa. Karta raqami va egasini yuboring.')
-
-    await db.upsert_pay_method(bot_id, 'Karta', card)
-    await state.clear()
-    await m.answer(
-        f"✅ Karta raqami saqlandi!\n\n"
-        f"🤖 Bot: @{r['username']}\n"
-        f"💳 Karta:\n{card}\n\n"
-        "Endi shu kino bot ichida premium oladigan userlarga shu karta ko‘rinadi.",
-        reply_markup=main_menu()
-    )
-
-
-@main_router.callback_query(F.data.startswith('bot_upgrade:'))
-async def bot_upgrade_cb(c:CallbackQuery):
-    bot_id=int(c.data.split(':')[1]); r=await db.bot_by_id(bot_id)
-    if not r or (r['owner_id']!=c.from_user.id and not is_admin(c.from_user.id)): return await c.answer('Ruxsat yo‘q', show_alert=True)
-    rows=await db.platform_tariffs(True)
-    await c.message.answer('📊 Tarifni tanlang:', reply_markup=platform_tariffs_inline(rows, int(r['platform_tariff_id'] or 0), f'platform_upgrade:{bot_id}'))
-    await c.answer()
-
-@main_router.callback_query(F.data.startswith('platform_upgrade:'))
-async def platform_upgrade_apply(c:CallbackQuery):
-    _,bot_id,tid=c.data.split(':'); bot_id=int(bot_id); tid=int(tid)
-    r=await db.bot_by_id(bot_id); t=await db.platform_tariff_by_id(tid)
-    if not r or not t or (r['owner_id']!=c.from_user.id and not is_admin(c.from_user.id)): return await c.answer('Ruxsat yo‘q', show_alert=True)
-    price=int(t['monthly_price']); u=await db.get_user(c.from_user.id); bal=int(u['balance']) if u else 0
-    if bal<price: return await c.answer(f'Balans yetarli emas. Kerak: {fmt_money(price)} so‘m', show_alert=True)
-    await db.take_balance(c.from_user.id, price); await db.set_bot_platform(bot_id,tid,30); await start_child(bot_id)
-    await c.message.answer(f"✅ Tarif yangilandi!\n\n📦 {t['name']}\n💵 {fmt_money(price)} so‘m\n⏳ 30 kun\n\nBot avtomatik ishlashda davom etadi.")
-    await c.answer('Tarif yangilandi')
-
-@main_router.callback_query(F.data.startswith('bot_paydays:'))
-async def bot_paydays_cb(c:CallbackQuery):
-    bot_id=int(c.data.split(':')[1]); r=await db.bot_by_id(bot_id)
-    if not r or (r['owner_id']!=c.from_user.id and not is_admin(c.from_user.id)): return await c.answer('Ruxsat yo‘q', show_alert=True)
-    t=await db.platform_tariff_by_id(int(r['platform_tariff_id'] or 0))
-    if not t: return await c.answer('Tarif topilmadi', show_alert=True)
-    per_day=max(1, int(int(t['monthly_price'])/30))
-    txt=(f"🤖 @{r['username']} uchun qancha muddatga to‘lov qilmoqchisiz?\n\n"
-         f"🔹 Tarif: {t['name']}\n"
-         f"💵 Narxi: {fmt_money(t['monthly_price'])} so‘m ({fmt_money(per_day)} so‘m/kun)\n\n"
-         f"📅 Necha kunlik to‘lov qilmoqchisiz?")
-    await c.message.answer(txt, reply_markup=rkb([[f'1 kun — {fmt_money(per_day)} so‘m'],[f'3 kun — {fmt_money(per_day*3)} so‘m'],[f'7 kun — {fmt_money(per_day*7)} so‘m'],[f'10 kun — {fmt_money(per_day*10)} so‘m'],[f'20 kun — {fmt_money(per_day*20)} so‘m'],[f'30 kun — {fmt_money(per_day*30)} so‘m'],['◀️ Orqaga']]))
-    await c.answer()
-
-@main_router.callback_query(F.data.startswith('bot_restart:'))
-async def bot_restart_cb(c:CallbackQuery):
-    bot_id=int(c.data.split(':')[1])
-    r=await db.bot_by_id(bot_id)
-    if not r or (r['owner_id']!=c.from_user.id and not is_admin(c.from_user.id)):
-        return await c.answer('Ruxsat yo‘q', show_alert=True)
-    await stop_child(bot_id)
-    ok=await start_child(bot_id)
-    await c.message.answer('🔄 Bot qayta ishga tushirildi.' if ok else '❌ Botni ishga tushirib bo‘lmadi. Tokenni tekshiring.')
-    await c.answer('Bajarildi')
-
-@main_router.callback_query(F.data.startswith('bot_clearcache:'))
-async def bot_clearcache_cb(c:CallbackQuery):
-    bot_id=int(c.data.split(':')[1])
-    r=await db.bot_by_id(bot_id)
-    if not r or (r['owner_id']!=c.from_user.id and not is_admin(c.from_user.id)):
-        return await c.answer('Ruxsat yo‘q', show_alert=True)
-    before_runtime=len(runtime_cache)
-    before_spam=len(spam_cache)
-    runtime_cache.clear()
-    spam_cache.clear()
-    deleted=0
-    try:
-        deleted=await db.clean_expired_premium(bot_id)
-    except Exception:
-        deleted=0
-    await c.message.answer(
-        '🧹 Kesh tozalandi!\n\n'
-        f'♻️ Runtime cache: {before_runtime} ta\n'
-        f'🛡 Spam cache: {before_spam} ta\n'
-        f'💎 Eskirgan premium: {deleted} ta\n\n'
-        'Botni qayta ishga tushirmasdan vaqtinchalik holatlar tozalandi.'
-    )
-    await c.answer('Kesh tozalandi')
-
-@main_router.callback_query(F.data.startswith('bot_dashboard:'))
-async def bot_dashboard_cb(c:CallbackQuery):
-    bot_id=int(c.data.split(':')[1])
-    r=await db.bot_by_id(bot_id)
-    if not r or (r['owner_id']!=c.from_user.id and not is_admin(c.from_user.id)):
-        return await c.answer('Ruxsat yo‘q', show_alert=True)
-    async with db.conn() as con:
-        movies=(await (await con.execute('SELECT COUNT(*) c FROM movies WHERE bot_id=?',(bot_id,))).fetchone())['c']
-        views=(await (await con.execute('SELECT COUNT(*) c FROM movie_views WHERE bot_id=?',(bot_id,))).fetchone())['c']
-        premium=(await (await con.execute('SELECT COUNT(*) c FROM premium WHERE bot_id=? AND until_ts>?',(bot_id,int(time.time())))).fetchone())['c']
-        pays=(await (await con.execute('SELECT COUNT(*) c FROM payments WHERE bot_id=?',(bot_id,))).fetchone())['c']
-        ads=(await (await con.execute('SELECT COUNT(*) c FROM ads WHERE bot_id=?',(bot_id,))).fetchone())['c']
-    await c.message.answer(
-        f'📈 Dashboard @{r["username"]}\n\n'
-        f'🎬 Kinolar: {movies} ta\n'
-        f'👁 Ko‘rishlar: {views} ta\n'
-        f'💎 Premium userlar: {premium} ta\n'
-        f'💳 To‘lovlar: {pays} ta\n'
-        f'📢 Reklamalar: {ads} ta\n\n'
-        'Web dashboard keyingi bosqichda ulanadi. Hozir Telegram dashboard ishlaydi.'
-    )
-    await c.answer()
-
-@main_router.callback_query(F.data.startswith('bot_adminid:'))
-async def bot_adminid_cb(c:CallbackQuery, state:FSMContext):
-    bot_id=int(c.data.split(':')[1])
-    r=await db.bot_by_id(bot_id)
-    if not r or (r['owner_id']!=c.from_user.id and not is_admin(c.from_user.id)):
-        return await c.answer('Ruxsat yo‘q', show_alert=True)
-    await state.set_state('main_change_owner_id')
-    await state.update_data(bot_id=bot_id, action='adminid')
-    await c.message.answer(
-        f'🆔 Hozirgi admin/egasi: {r["owner_id"]}\n\n'
-        'Yangi admin ID yuboring.\n'
-        'Bu ID bot egasi sifatida belgilanadi va /panel boshqaruviga ruxsat oladi.'
-    )
-    await c.answer()
-
-@main_router.callback_query(F.data.startswith('bot_transfer:'))
-async def bot_transfer_cb(c:CallbackQuery, state:FSMContext):
-    bot_id=int(c.data.split(':')[1])
-    r=await db.bot_by_id(bot_id)
-    if not r or (r['owner_id']!=c.from_user.id and not is_admin(c.from_user.id)):
-        return await c.answer('Ruxsat yo‘q', show_alert=True)
-    await state.set_state('main_change_owner_id')
-    await state.update_data(bot_id=bot_id, action='transfer')
-    await c.message.answer(
-        f'🔀 Botni boshqa foydalanuvchiga o‘tkazish\n\n'
-        f'Bot: @{r["username"]}\n'
-        f'Hozirgi egasi: {r["owner_id"]}\n\n'
-        'Yangi egasining Telegram ID raqamini yuboring:'
-    )
-    await c.answer()
-
-@main_router.message(StateFilter('main_change_owner_id'))
-async def main_change_owner_id(m:Message, state:FSMContext):
-    raw=(m.text or '').strip()
-    if not raw.isdigit():
-        return await m.answer('❌ Faqat raqam ID yuboring. Masalan: 5907118746')
-    new_owner=int(raw)
-    data=await state.get_data()
-    bot_id=int(data.get('bot_id',0))
-    r=await db.bot_by_id(bot_id)
-    if not r or (r['owner_id']!=m.from_user.id and not is_admin(m.from_user.id)):
-        await state.clear()
-        return await m.answer('⛔ Ruxsat yo‘q')
-    async with db.conn() as con:
-        await con.execute('UPDATE bots SET owner_id=? WHERE id=?',(new_owner,bot_id))
-        await con.execute('INSERT OR IGNORE INTO users(user_id,balance,created_at) VALUES(?,?,?)',(new_owner,0,int(time.time())))
-        await con.commit()
-    runtime_cache.clear()
-    await state.clear()
-    await m.answer(
-        f'✅ Bot egasi/admin ID yangilandi!\n\n'
-        f'🤖 Bot: @{r["username"]}\n'
-        f'🆔 Yangi admin ID: {new_owner}\n\n'
-        'Endi shu foydalanuvchi bot ichida /panel orqali boshqara oladi.',
-        reply_markup=main_menu()
-    )
-
-@main_router.callback_query(F.data=='bot_back')
-async def bot_back_cb(c:CallbackQuery):
-    await c.message.answer('🤖 Botlarim bo‘limi:', reply_markup=main_menu()); await c.answer()
-
-@main_router.message(F.text=='🗣 Referal')
-async def referral(m:Message):
-    bonus=int(await db.get_global('referral_bonus','0') or 0); refs=await db.ref_count(m.from_user.id)
-    me=await m.bot.get_me(); link=f'https://t.me/{me.username}?start={m.from_user.id}'
-    await m.answer(f'🗣 Referal bo‘limi\n\n👥 Referallaringiz: {refs} ta\n🎁 Har referal bonusi: {fmt_money(bonus)} so‘m\n\n🔗 Sizning linkingiz:\n{link}')
-
-@main_router.message(F.text=='💳 Hisob to\'ldirish')
-async def topup(m:Message, state:FSMContext):
-    await state.clear()
-    await m.answer(
-        "💳 To‘lov tizimini tanlang:\n\n"
-        "Bu yer asosiy bot balansi uchun. Bot yaratish/tarif uchun balans to‘ldirasiz.\n\nO‘z kino botingiz karta raqamini qo‘yish uchun:\n🤖 Botlarim → Botni sozlash → 💳 Karta Sozlash\n\nTo‘lovni amalga oshirasiz, chek yuborasiz, admin tasdiqlagandan keyin balans avtomatik qo‘shiladi.",
-        reply_markup=topup_menu()
-    )
-
-@main_router.message(F.text.in_({'⚪ Payme (Avto)','🔵 Click (Avto)','💳 Karta (Avto)','💳 Humo'}))
+@main_router.message(F.text.in_({'💳 Karta orqali to‘lash','⚪ Payme (Avto)','🔵 Click (Avto)','💳 Karta (Avto)','💳 Humo'}))
 async def topup_choose_method(m:Message, state:FSMContext):
-    method=m.text.strip()
+    method='💳 Karta'
+    card=await db.get_global('main_payment_card','')
+    if not card:
+        if is_admin(m.from_user.id):
+            return await m.answer(
+                '❌ Avval asosiy karta raqamini sozlang.\\n\\n'
+                'Yo‘li: /admin → ⚙️ Global sozlamalar → 💳 Asosiy karta raqami',
+                reply_markup=main_menu()
+            )
+        return await m.answer('❌ Hozircha karta raqami kiritilmagan. Admin bilan bog‘laning.', reply_markup=main_menu())
+
     await state.set_state("main_topup_amount")
-    await state.update_data(topup_method=method)
+    await state.update_data(topup_method=method, topup_card=card)
     await m.answer(
-        f"💳 {method}\n\n"
-        "💰 To‘lov miqdorini kiriting:\n\n"
-        "Minimal: 1 000 so‘m\n"
+        "💳 Karta orqali balans to‘ldirish\\n\\n"
+        f"💳 Karta:\\n{card}\\n\\n"
+        "Pulni shu kartaga tashlang va summani yozing.\\n\\n"
+        "💰 To‘lov miqdorini kiriting:\\n"
+        "Minimal: 1 000 so‘m\\n"
         "Masalan: 18000",
         reply_markup=rkb([['◀️ Orqaga']])
     )
@@ -617,6 +283,7 @@ async def topup_amount(m:Message, state:FSMContext):
         return await m.answer("❌ Minimal summa: 1 000 so‘m")
     data=await state.get_data()
     method=data.get('topup_method','Karta')
+    card=data.get('topup_card') or await db.get_global('main_payment_card','')
     await state.set_state("main_topup_receipt")
     await state.update_data(topup_amount=amount)
     await m.answer(
@@ -818,6 +485,33 @@ async def set_ref_bonus1(m:Message,state:FSMContext):
 @main_router.message(GlobalSetting.referral_bonus)
 async def set_ref_bonus2(m:Message,state:FSMContext):
     await db.set_global('referral_bonus', max(0,int(m.text.strip()))); await state.clear(); await m.answer('✅ Referal bonus summasi saqlandi', reply_markup=global_settings_menu())
+
+
+@main_router.message(F.text=='💳 Asosiy karta raqami')
+async def set_main_card1(m:Message,state:FSMContext):
+    if not is_admin(m.from_user.id):
+        return await m.answer('⛔ Ruxsat yo‘q')
+    current=await db.get_global('main_payment_card','')
+    await state.set_state('set_main_payment_card')
+    await m.answer(
+        '💳 Asosiy bot uchun karta raqamini yuboring.\n\n'
+        f'Hozirgi karta:\n{current or "kiritilmagan"}\n\n'
+        'Masalan:\n8600 0000 0000 0000\nSABIROV ISLOMBEK',
+        reply_markup=rkb([['◀️ Orqaga']])
+    )
+
+@main_router.message(StateFilter('set_main_payment_card'))
+async def set_main_card2(m:Message,state:FSMContext):
+    if m.text=='◀️ Orqaga':
+        await state.clear()
+        return await m.answer('Bekor qilindi.', reply_markup=global_settings_menu())
+    card=(m.text or '').strip()
+    if len(card)<8:
+        return await m.answer('❌ Karta ma’lumoti juda qisqa. Karta raqami va egasini yuboring.')
+    await db.set_global('main_payment_card', card)
+    await state.clear()
+    await m.answer('✅ Asosiy karta raqami saqlandi!\n\n'+card, reply_markup=global_settings_menu())
+
 
 @main_router.message(F.text=='📱 Shaxsiy kabinet')
 async def cabinet(m:Message):

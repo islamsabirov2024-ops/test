@@ -61,11 +61,8 @@ def global_settings_menu():
 
 def topup_menu():
     return rkb([
-        ['⚪ Payme (Avto)'],
-        ['🔵 Click (Avto)'],
-        ['💳 Karta (Avto)'],
-        ['💳 Humo'],
-        nav_row(),
+        ['💳 Karta orqali to‘lash'],
+        ['◀️ Orqaga'],
     ])
 
 
@@ -216,6 +213,7 @@ def tariff_manage_menu():
 def referral_admin_menu():
     return rkb([
         ['🎁 Referal bonus summasi'],
+        ['💳 Asosiy karta raqami'],
         ['📋 Referal sozlamalari'],
         nav_row(),
     ])
