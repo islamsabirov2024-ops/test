@@ -22,6 +22,7 @@ def main_menu():
 def bot_types_menu():
     return rkb([
         ['🎬 Kino Bot'],
+        ['💻 IT Dars Bot'],
         ['🚀 Nakrutka Bot'],
         ['💵 Pul Bot'],
         ['📥 OpenBudget Bot'],
@@ -409,3 +410,30 @@ def sub_check(channels=None):
     b.button(text='✅ Tekshirish', callback_data='check_sub')
     b.adjust(1)
     return b.as_markup()
+
+
+def it_user_menu(is_admin=False):
+    rows=[
+        ['📚 Darslar','🧭 O‘quv yo‘li'],
+        ['🐍 Python','🌐 HTML/CSS'],
+        ['🤖 Telegram bot','🗄 Database'],
+        ['💻 Kompyuter savodxonligi','🧠 Testlar'],
+    ]
+    if is_admin:
+        rows.append(['⚙️ Boshqaruv'])
+    return rkb(rows)
+
+def it_admin_menu():
+    return rkb([
+        ['📊 Statistika','📩 Xabar yuborish'],
+        ['📚 Darslarni ko‘rish','👥 Foydalanuvchilar'],
+        ['⚙️ Tizim sozlamalari'],
+        nav_row(),
+    ])
+
+def broadcast_progress_menu(paused=False):
+    return rkb([
+        ['🔄 Yangilash', '▶️ Davom ettirish' if paused else '⏸ Pauza'],
+        ['🗑 Xabar o‘chirish'],
+        nav_row(),
+    ])

@@ -4,6 +4,7 @@ import aiosqlite
 from .config import DATABASE_PATH
 
 CREATE = [
+"""CREATE TABLE IF NOT EXISTS child_users(bot_id INTEGER, user_id INTEGER, first_seen INTEGER, last_seen INTEGER, visits INTEGER DEFAULT 0, blocked INTEGER DEFAULT 0, PRIMARY KEY(bot_id,user_id))""",
 """CREATE TABLE IF NOT EXISTS users(user_id INTEGER PRIMARY KEY, balance INTEGER DEFAULT 0, ref_by INTEGER, created_at INTEGER)""",
 """CREATE TABLE IF NOT EXISTS global_settings(key TEXT PRIMARY KEY, value TEXT)""",
 """CREATE TABLE IF NOT EXISTS bots(id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id INTEGER, token TEXT UNIQUE, username TEXT, title TEXT, type TEXT DEFAULT 'kino', status TEXT DEFAULT 'active', created_at INTEGER)""",
@@ -140,9 +141,9 @@ async def get_global(key:str, default=''):
     async with conn() as db:
         cur=await db.execute('SELECT value FROM global_settings WHERE key=?',(key,)); r=await cur.fetchone(); return r['value'] if r else default
 
-async def add_bot(owner_id:int, token:str, username:str, title:str):
+async def add_bot(owner_id:int, token:str, username:str, title:str, bot_type:str='kino'):
     async with conn() as db:
-        cur=await db.execute('INSERT INTO bots(owner_id,token,username,title,created_at) VALUES(?,?,?,?,?)',(owner_id,token,username,title,int(time.time())))
+        cur=await db.execute('INSERT INTO bots(owner_id,token,username,title,type,created_at) VALUES(?,?,?,?,?,?)',(owner_id,token,username,title,bot_type,int(time.time())))
         await db.commit(); return cur.lastrowid
 async def bots(owner_id=None):
     async with conn() as db:
@@ -776,3 +777,64 @@ async def child_user_search(bot_id:int, user_id:int):
         prem=await db.execute("SELECT until_ts FROM premium WHERE bot_id=? AND user_id=?", (bot_id,user_id))
         pr=await prem.fetchone()
         return {"user_id":user_id, "views":views, "last_seen":last or 0, "premium_until":(pr['until_ts'] if pr else 0)}
+
+
+# ===== CHILD USER TRACKING + BROADCAST =====
+async def touch_child_user(bot_id:int, user_id:int):
+    now=int(time.time())
+    async with conn() as db:
+        await db.execute(
+            """INSERT INTO child_users(bot_id,user_id,first_seen,last_seen,visits,blocked)
+               VALUES(?,?,?,?,1,0)
+               ON CONFLICT(bot_id,user_id) DO UPDATE SET last_seen=excluded.last_seen, visits=visits+1""",
+            (int(bot_id), int(user_id), now, now)
+        )
+        await db.commit()
+
+async def child_broadcast_targets(bot_id:int):
+    async with conn() as db:
+        cur=await db.execute("SELECT user_id FROM child_users WHERE bot_id=? AND COALESCE(blocked,0)=0 ORDER BY last_seen DESC", (int(bot_id),))
+        rows=await cur.fetchall()
+        if rows:
+            return [int(r['user_id']) for r in rows]
+        cur=await db.execute("SELECT DISTINCT user_id FROM movie_views WHERE bot_id=? ORDER BY created_at DESC", (int(bot_id),))
+        rows=await cur.fetchall()
+        return [int(r['user_id']) for r in rows]
+
+async def child_users_stats(bot_id:int):
+    now=int(time.time())
+    async with conn() as db:
+        total=(await (await db.execute("SELECT COUNT(*) c FROM child_users WHERE bot_id=?", (bot_id,))).fetchone())['c']
+        active24=(await (await db.execute("SELECT COUNT(*) c FROM child_users WHERE bot_id=? AND last_seen>?", (bot_id, now-86400))).fetchone())['c']
+        active7=(await (await db.execute("SELECT COUNT(*) c FROM child_users WHERE bot_id=? AND last_seen>?", (bot_id, now-7*86400))).fetchone())['c']
+        blocked=(await (await db.execute("SELECT COUNT(*) c FROM child_users WHERE bot_id=? AND COALESCE(blocked,0)=1", (bot_id,))).fetchone())['c']
+        premium=(await (await db.execute("SELECT COUNT(*) c FROM premium WHERE bot_id=? AND until_ts>?", (bot_id, now))).fetchone())['c']
+        return {"total":total, "active24":active24, "active7":active7, "blocked":blocked, "premium":premium}
+
+async def child_users_list(bot_id:int, limit:int=30):
+    async with conn() as db:
+        cur=await db.execute("SELECT * FROM child_users WHERE bot_id=? ORDER BY last_seen DESC LIMIT ?", (bot_id, limit))
+        return await cur.fetchall()
+
+async def child_user_search(bot_id:int, user_id:int):
+    async with conn() as db:
+        cur=await db.execute("SELECT * FROM child_users WHERE bot_id=? AND user_id=?", (bot_id, user_id))
+        u=await cur.fetchone()
+        views=(await (await db.execute("SELECT COUNT(*) c FROM movie_views WHERE bot_id=? AND user_id=?", (bot_id,user_id))).fetchone())['c']
+        prem=await db.execute("SELECT until_ts FROM premium WHERE bot_id=? AND user_id=?", (bot_id,user_id))
+        pr=await prem.fetchone()
+        return {
+            "user_id": user_id,
+            "first_seen": (u['first_seen'] if u else 0),
+            "last_seen": (u['last_seen'] if u else 0),
+            "visits": (u['visits'] if u else 0),
+            "blocked": (u['blocked'] if u else 0),
+            "views": views,
+            "premium_until": (pr['until_ts'] if pr else 0)
+        }
+
+async def set_child_user_block(bot_id:int, user_id:int, blocked:int):
+    await touch_child_user(bot_id,user_id)
+    async with conn() as db:
+        await db.execute("UPDATE child_users SET blocked=? WHERE bot_id=? AND user_id=?", (int(blocked), int(bot_id), int(user_id)))
+        await db.commit()

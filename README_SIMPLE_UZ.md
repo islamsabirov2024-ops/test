@@ -53,3 +53,11 @@ Chek tasdiqlansa admin xabari TASDIQLANDI bo‘lib o‘zgaradi.
 - DB tozalash: eski chek/reklama/runtime yozuvlarini tozalaydi, balans va kinolarni o‘chirmaydi.
 - Premium to‘lov: faqat avtomat emas, admin tasdiq va avtomat ikkalasi ham alohida ON/OFF.
 - Reklama queue: xabarlar navbat bilan yuboriladi.
+
+
+
+## FINAL FULL PRO qo‘shimchalar
+- Kino botda PRO xabar yuborish: matn/rasm/video/document, preview, tugma, progress, pauza/davom ettirish/o‘chirish.
+- Foydalanuvchilar paneli real ishlaydi: ro‘yxat, qidirish, premium/aktivlik.
+- IT Dars Bot qo‘shildi: kompyuter savodxonligi, HTML/CSS, Python, Telegram bot, Database va test darslari.
+- Main bot token qabul qilish jarayoni va child bot manager saqlangan.

@@ -1,7 +1,7 @@
 import asyncio, logging, time, re, datetime, copy
 from aiogram import Bot, Dispatcher, F, Router
-from aiogram.filters import Command, CommandStart, StateFilter, StateFilter, StateFilter, StateFilter
-from aiogram.types import Message, CallbackQuery, LinkPreviewOptions, InlineKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import Command, CommandStart, StateFilter
+from aiogram.types import Message, CallbackQuery, LinkPreviewOptions, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.exceptions import TelegramConflictError
@@ -18,6 +18,7 @@ main_router=Router(); child_router=Router()
 nav_stack={}
 main_pending_topups={}
 broadcast_queue=[]
+broadcast_jobs={}
 
 def remember_nav(user_id:int, menu:str):
     nav_stack[user_id]=menu
@@ -189,6 +190,8 @@ async def start(m:Message):
         if m.text and len(m.text.split())>1: ref=int(m.text.split()[1])
     except Exception: pass
     await db.add_user(m.from_user.id, ref)
+    try: await db.touch_child_user(bid, m.from_user.id)
+    except Exception: pass
     await m.answer(f"👋 Assalomu alaykum, {m.from_user.full_name}!\n\nMenyudan tanlang:", reply_markup=main_menu())
 @main_router.message(Command('admin'))
 async def admin(m:Message):
@@ -221,6 +224,28 @@ async def choose_kino_bot(m:Message, state:FSMContext):
     text += "Davom etish uchun kerakli tarifni tanlang."
     await m.answer(text, reply_markup=platform_tariffs_inline(rows, 0, 'platform_select'))
 
+
+@main_router.message(F.text=='💻 IT Dars Bot')
+async def choose_it_bot(m:Message, state:FSMContext):
+    await db.ensure_platform_tables()
+    rows=await db.platform_tariffs(True)
+    await state.update_data(kind='it')
+    text = "💻 IT Dars Bot — Tariflar\n\n"
+    for r in rows:
+        limit = 'Cheksiz' if int(r['daily_limit'] or 0)==0 else f"{fmt_money(r['daily_limit'])} ta / Kuniga"
+        per_day = int(int(r['monthly_price'])/30) if int(r['monthly_price']) else 0
+        text += (
+            f"┌ {r['name']}\n"
+            f"├ 💵 Narxi: {fmt_money(r['monthly_price'])} so'm/oy ({fmt_money(per_day)} so'm/kun)\n"
+            f"├ 👥 Foydalanuvchilar: {limit}\n"
+            f"├ ✅ Tayyor IT darsliklar\n"
+            f"├ ✅ Javob tezligi: {r['speed']}\n"
+            "└──────────────\n\n"
+        )
+    text += "Davom etish uchun kerakli tarifni tanlang."
+    await m.answer(text, reply_markup=platform_tariffs_inline(rows, 0, 'platform_select'))
+
+
 @main_router.callback_query(F.data.startswith('platform_select:'))
 async def platform_select(c:CallbackQuery, state:FSMContext):
     tid=int(c.data.split(':')[1]); t=await db.platform_tariff_by_id(tid)
@@ -231,7 +256,7 @@ async def platform_select(c:CallbackQuery, state:FSMContext):
     if bal < price:
         return await c.message.answer(f"❌ Balans yetarli emas.\n\n📦 Tarif: {t['name']}\n💰 Narx: {fmt_money(price)} so'm\n💳 Sizda: {fmt_money(bal)} so'm\n\nAvval 💳 Hisob to'ldirish bo‘limidan balans to‘ldiring.")
     await state.set_state(CreateBot.token)
-    await state.update_data(kind='kino', price=price, platform_tariff_id=tid)
+    await state.update_data(price=price, platform_tariff_id=tid)
     await c.message.answer(
         f"✅ Tarif tanlandi: {t['name']}\n"
         f"💰 Narx: {fmt_money(price)} so'm / 30 kun\n"
@@ -730,7 +755,8 @@ async def create_bot_token(m:Message, state:FSMContext):
 
     # Botni DBga saqlash
     try:
-        bot_id=await db.add_bot(m.from_user.id, token, me.username, me.full_name or me.username)
+        bot_type=data.get('kind','kino')
+        bot_id=await db.add_bot(m.from_user.id, token, me.username, me.full_name or me.username, bot_type)
         await db.activate_platform_for_bot(bot_id, tariff_id, 30)
     except Exception as e:
         # saqlashda xato bo‘lsa pulni qaytarish
@@ -754,7 +780,7 @@ async def create_bot_token(m:Message, state:FSMContext):
 
     await state.clear()
     await m.answer(
-        f"✅ Kino Bot yaratildi!\n\n"
+        f"✅ {'IT Dars Bot' if data.get('kind')=='it' else 'Kino Bot'} yaratildi!\n\n"
         f"🤖 Bot: @{me.username}\n"
         f"🆔 ID: {bot_id}\n"
         f"💰 Yechildi: {fmt_money(price)} so‘m\n"
@@ -782,6 +808,16 @@ async def child_start(m:Message):
         if bonus>0: await db.add_referral_balance(bid, ref, bonus)
     owner=await child_owner_by_runtime(m.bot.id)
     adminflag= m.from_user.id==owner or is_admin(m.from_user.id) or await db.is_bot_admin(bid,m.from_user.id)
+    bot_row=await db.bot_by_id(bid)
+    bot_type=(bot_row['type'] if bot_row and 'type' in bot_row.keys() else 'kino')
+    if bot_type=='it':
+        start_text=(
+            f"👋 Assalomu alaykum {m.from_user.full_name}!\n\n"
+            "💻 IT Dars Botga xush kelibsiz.\n"
+            "Bu botda kompyuter savodxonligi, Python, HTML/CSS, Telegram bot va Database darslari bor.\n\n"
+            "📚 Darslar bo‘limidan boshlang."
+        )
+        return await m.answer(start_text, reply_markup=it_user_menu(adminflag))
     start_text=await db.get_setting(bid,'text_start',f"👋 Assalomu alaykum {m.from_user.full_name}!\n\n🎬 Kino kodini yuboring yoki menyudan tanlang.")
     await m.answer(start_text, reply_markup=kino_user_menu(adminflag))
     if await db.get_setting(bid,'ad_start','0')=='1':
@@ -791,6 +827,10 @@ async def child_start(m:Message):
 async def child_panel(m:Message):
     if not await is_child_admin(m): return await m.answer('⛔ Ruxsat yo‘q')
     remember_nav(m.from_user.id,'admin')
+    bot_row=await db.bot_by_id(await runtime_db_id(m.bot.id))
+    bot_type=(bot_row['type'] if bot_row and 'type' in bot_row.keys() else 'kino')
+    if bot_type=='it':
+        return await m.answer('💻 IT Dars Bot admin panel:', reply_markup=it_admin_menu())
     await m.answer('🎬 Kino bot admin panel:', reply_markup=kino_admin_menu())
 @child_router.message(F.text.in_({'🏠 Asosiy panel','◀️ Asosiy panel'}))
 async def child_home(m:Message):
@@ -1875,6 +1915,64 @@ async def send_ad_to_user(m:Message, bot_id:int):
         try: await db.record_runtime_event(bot_id, 'warning', 'ad_send_failed', str(e))
         except Exception: pass
 
+
+async def send_broadcast_payload(bot:Bot, user_id:int, payload:dict):
+    markup=ad_buttons_markup(payload.get('buttons',''))
+    text=payload.get('text','') or ''
+    mt=payload.get('media_type','text')
+    fid=payload.get('file_id','')
+    if mt=='photo' and fid:
+        await bot.send_photo(user_id, fid, caption=text, reply_markup=markup)
+    elif mt=='video' and fid:
+        await bot.send_video(user_id, fid, caption=text, reply_markup=markup)
+    elif mt=='document' and fid:
+        await bot.send_document(user_id, fid, caption=text, reply_markup=markup)
+    elif mt=='animation' and fid:
+        await bot.send_animation(user_id, fid, caption=text, reply_markup=markup)
+    else:
+        await bot.send_message(user_id, text or '📩 Xabar', reply_markup=markup, link_preview_options=NO_PREVIEW)
+
+async def broadcast_worker_job(bot:Bot, job_id:str):
+    job=broadcast_jobs.get(job_id)
+    if not job: return
+    targets=job.get('targets',[])
+    total=len(targets)
+    job['status']='running'
+    for uid in targets:
+        if job.get('deleted'): break
+        while job.get('paused') and not job.get('deleted'):
+            await asyncio.sleep(1)
+        if job.get('deleted'): break
+        try:
+            await send_broadcast_payload(bot, uid, job['payload'])
+            job['sent'] += 1
+        except Exception:
+            job['failed'] += 1
+        await asyncio.sleep(0.05)
+    if not job.get('deleted'):
+        job['status']='done'
+
+def broadcast_status_text(job:dict):
+    total=max(1,len(job.get('targets',[])))
+    sent=int(job.get('sent',0)); failed=int(job.get('failed',0))
+    pct=(sent+failed)*100/total
+    status='🟢 Yuborilmoqda' if job.get('status')=='running' else ('⏸ Pauzada' if job.get('paused') else '✅ Tugadi')
+    if job.get('deleted'): status='🗑 O‘chirildi'
+    return (
+        "📩 Xabar ma’lumotlari:\n\n"
+        f"📌 Turi: {job.get('kind','Oddiy xabar')}\n"
+        f"⚙️ Holat: {status}\n"
+        f"✅ Yuborildi: {sent} / {len(job.get('targets',[]))} ta\n"
+        f"❌ Xato: {failed} ta\n"
+        f"⌛ Jarayon: {pct:.1f}%\n\n"
+        f"🕘 {fmt_dt(job.get('created_at', int(time.time())))}"
+    )
+
+async def broadcast_preview(m:Message, data:dict):
+    await send_broadcast_payload(m.bot, m.chat.id, data)
+    await m.answer('👆 Xabar shunday ko‘rinadi.\n\nBoshlashdan oldin tugma qo‘shishingiz mumkin.', reply_markup=broadcast_confirm_menu(), link_preview_options=NO_PREVIEW)
+
+
 async def send_part_message(m:Message, mv, p):
     bid=await runtime_db_id(m.bot.id)
     cap=p['caption'] or mv['caption'] or await db.get_setting(bid,'text_Kino_caption_matni','')
@@ -1907,10 +2005,121 @@ async def movie_part_callback(c:CallbackQuery):
     await send_part_message(c.message, mv, p)
     await c.answer()
 
+
+IT_LESSONS = {
+    '📚 Darslar': (
+        "📚 IT darsliklar ro‘yxati:\n\n"
+        "1. 💻 Kompyuter savodxonligi\n"
+        "2. 🌐 HTML/CSS\n"
+        "3. 🐍 Python\n"
+        "4. 🤖 Telegram bot yaratish\n"
+        "5. 🗄 Database\n"
+        "6. 🧠 Testlar\n\n"
+        "Boshlash uchun pastdagi bo‘limlardan birini tanlang."
+    ),
+    '🧭 O‘quv yo‘li': (
+        "🧭 Tavsiya qilingan o‘quv yo‘li:\n\n"
+        "1️⃣ Kompyuter savodxonligi: fayl, papka, internet, xavfsizlik\n"
+        "2️⃣ HTML/CSS: sayt tuzilishi va dizayn\n"
+        "3️⃣ Python: dasturlash asoslari\n"
+        "4️⃣ Telegram bot: aiogram, handler, keyboard, DB\n"
+        "5️⃣ Database: SQLite/PostgreSQL\n"
+        "6️⃣ Amaliy loyiha: Kino bot yoki dars bot\n\n"
+        "Har kuni 1–2 soat o‘qisangiz 2–3 oyda mustaqil oddiy bot yoza olasiz."
+    ),
+    '💻 Kompyuter savodxonligi': (
+        "💻 Kompyuter savodxonligi\n\n"
+        "1-dars: Fayl va papka\n"
+        "• Fayl — rasm, video, hujjat yoki kod.\n"
+        "• Papka — fayllar turadigan joy.\n"
+        "• Muhim fayllarni tartib bilan saqlang.\n\n"
+        "2-dars: Internet xavfsizligi\n"
+        "• Token, parol, karta ma’lumotini hech kimga bermang.\n"
+        "• Telegram bot tokenini faqat server Variables ichida saqlang.\n\n"
+        "3-dars: GitHub\n"
+        "• Kodni saqlash joyi.\n"
+        "• Railway GitHubdan kodni olib ishga tushiradi."
+    ),
+    '🌐 HTML/CSS': (
+        "🌐 HTML/CSS darslari\n\n"
+        "HTML — sayt skeleti:\n"
+        "<h1>Sarlavha</h1>\n"
+        "<p>Matn</p>\n\n"
+        "CSS — dizayn:\n"
+        "body { font-family: Arial; }\n"
+        ".button { padding: 12px; border-radius: 10px; }\n\n"
+        "Amaliy vazifa: bitta landing page yasang: logo, matn, tugma, aloqa."
+    ),
+    '🐍 Python': (
+        "🐍 Python darslari\n\n"
+        "1. O‘zgaruvchi:\n"
+        "name = 'Ali'\n\n"
+        "2. Shart:\n"
+        "if age >= 18:\n    print('Ruxsat')\n\n"
+        "3. Funksiya:\n"
+        "def salom(name):\n    return 'Salom ' + name\n\n"
+        "4. List:\n"
+        "movies = ['Jigar', 'Sheriklar']\n\n"
+        "Amaliy vazifa: kino kodi yozilsa nomini chiqaradigan kichik dastur yozing."
+    ),
+    '🤖 Telegram bot': (
+        "🤖 Telegram bot yaratish\n\n"
+        "1. BotFatherdan token oling.\n"
+        "2. aiogram o‘rnating.\n"
+        "3. /start handler yozing.\n"
+        "4. ReplyKeyboard/InlineKeyboard qo‘shing.\n"
+        "5. Database ulang.\n\n"
+        "Oddiy oqim:\n"
+        "User /start bosadi → bot salom beradi → user kod yuboradi → bot javob beradi."
+    ),
+    '🗄 Database': (
+        "🗄 Database darslari\n\n"
+        "SQLite — kichik/local loyiha uchun.\n"
+        "PostgreSQL — server va SaaS uchun.\n\n"
+        "Asosiy SQL:\n"
+        "CREATE TABLE users(id INTEGER, name TEXT);\n"
+        "INSERT INTO users VALUES(1, 'Ali');\n"
+        "SELECT * FROM users;\n\n"
+        "Botda DB nima uchun kerak?\n"
+        "• userlar\n• balans\n• premium\n• kino kodlar\n• to‘lovlar"
+    ),
+    '🧠 Testlar': (
+        "🧠 Mini testlar\n\n"
+        "1. Bot tokenni qayerdan olamiz?\n"
+        "Javob: BotFather\n\n"
+        "2. Serverda doimiy DB uchun qaysi yaxshi?\n"
+        "Javob: PostgreSQL\n\n"
+        "3. HTML nima?\n"
+        "Javob: Sayt skeleti\n\n"
+        "4. Python nima?\n"
+        "Javob: Dasturlash tili\n\n"
+        "5. Telegram botda button nima uchun kerak?\n"
+        "Javob: Menyu va tez boshqaruv uchun."
+    ),
+}
+
+@child_router.message(F.text.in_(set(IT_LESSONS.keys())))
+async def it_lessons(m:Message):
+    bid=await runtime_db_id(m.bot.id)
+    try: await db.touch_child_user(bid, m.from_user.id)
+    except Exception: pass
+    await m.answer(IT_LESSONS[m.text], reply_markup=it_user_menu(await is_child_admin(m)))
+
+@child_router.message(F.text=='📚 Darslarni ko‘rish')
+async def it_admin_lessons(m:Message):
+    if not await is_child_admin(m): return
+    await m.answer(IT_LESSONS['📚 Darslar'], reply_markup=it_admin_menu())
+
+
 @child_router.message(F.text)
 async def movie_code(m:Message):
     if m.text in {'🎬 Kino kodini yozing'}: return await m.answer('🎬 Kino kodini yozib yuboring:')
     bid=await runtime_db_id(m.bot.id)
+    try: await db.touch_child_user(bid, m.from_user.id)
+    except Exception: pass
+    bot_row=await db.bot_by_id(bid)
+    if bot_row and 'type' in bot_row.keys() and bot_row['type']=='it':
+        return await m.answer('📚 Dars tanlang yoki /start bosing.', reply_markup=it_user_menu(await is_child_admin(m)))
     limit_ok, used, limit, limit_status, grace_until = await db.smart_limit_check(bid)
     if limit_status in {'slow_grace_started', 'slow'}:
         owner=await child_owner_by_runtime(m.bot.id)
